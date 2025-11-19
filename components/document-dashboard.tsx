@@ -1123,7 +1123,7 @@ export function DocumentDashboard() {
             <div className="flex items-center justify-between gap-4 p-4 border-t">
               <div className="flex items-center gap-4">
                 <p className="text-sm text-muted-foreground">
-                  Mostrando {startIndex}-{endIndex} de {totalDocuments} resultados
+                  Mostrando {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalDocuments)} de {totalDocuments} resultados
                 </p>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Filas por página:</span>

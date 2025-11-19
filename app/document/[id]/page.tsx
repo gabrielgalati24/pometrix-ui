@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { DocumentResults } from "@/components/document-results"
-import { documentsService } from "@/services/documents.service"
+import { documentsService, type DocumentWithGroup } from "@/services/documents.service"
 import { Loader2 } from "lucide-react"
 
 export default function DocumentPage() {
@@ -12,10 +12,7 @@ export default function DocumentPage() {
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [documentId, setDocumentId] = useState<string>("")
-  const [relatedDocuments, setRelatedDocuments] = useState<
-    Array<{ id: string; filename: string; type: string; url?: string }>
-  >([])
+  const [documentData, setDocumentData] = useState<DocumentWithGroup | null>(null)
 
   useEffect(() => {
     async function fetchDocumentData() {
@@ -25,27 +22,8 @@ export default function DocumentPage() {
 
         // Fetch document with group from backend
         const response = await documentsService.getDocumentById(Number(id))
+        setDocumentData(response)
 
-        // Determine which document to display and related documents
-        if (response.document_group) {
-          // If there's a document group, use the main document
-          const mainDoc = response.document_group.main_document
-          setDocumentId(mainDoc.id.toString())
-
-          // Map related documents
-          setRelatedDocuments(
-            response.document_group.related_documents.map(doc => ({
-              id: doc.id.toString(),
-              filename: doc.document_name,
-              type: doc.document_type,
-              url: doc.document_url,
-            }))
-          )
-        } else {
-          // Single document without group
-          setDocumentId(response.document.id.toString())
-          setRelatedDocuments([])
-        }
       } catch (err) {
         console.error("Error loading document:", err)
         setError(err instanceof Error ? err.message : "Error al cargar el documento")
@@ -82,13 +60,13 @@ export default function DocumentPage() {
     )
   }
 
-  if (!documentId) {
+  if (!documentData) {
     return null
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <DocumentResults documentId={documentId} relatedDocuments={relatedDocuments} />
+      <DocumentResults documentId={id} initialData={documentData} />
     </div>
   )
 }

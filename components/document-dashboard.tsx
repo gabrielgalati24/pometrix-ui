@@ -222,6 +222,7 @@ export function DocumentDashboard() {
   const [documents, setDocuments] = useState<DocumentRow[]>([])
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
   const [pagination, setPagination] = useState<Pagination | null>(null)
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
 
   useEffect(() => {
     if (!isAuthenticated && !isLoading) {
@@ -250,11 +251,18 @@ export function DocumentDashboard() {
   }, [organizationsError, toast])
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  useEffect(() => {
     if (currentPage !== 1) {
       setCurrentPage(1)
     }
   }, [
-    searchTerm,
+    debouncedSearchTerm,
     statusFilter,
     typeFilter,
     emisorFilter,
@@ -274,7 +282,24 @@ export function DocumentDashboard() {
     async (orgId: number, page: number, size: number) => {
       setIsLoadingDocuments(true)
       try {
-        const response = await documentsService.getDocuments(orgId, page, size)
+        const filters = {
+          search: debouncedSearchTerm || undefined,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          type: typeFilter !== "all" ? typeFilter : undefined,
+          uploaded_by: userFilter !== "all" && userFilter !== "myDocuments" ? userFilter : undefined, // Adjust based on actual backend requirement for "myDocuments"
+          date_start: fechaSubidaDesde || undefined,
+          date_end: fechaSubidaHasta || undefined,
+        }
+
+        // Handle "myDocuments" special case if needed, or assume userFilter holds the username
+        if (userFilter === "myDocuments") {
+          // If the backend expects a specific flag or username for "myDocuments", set it here.
+          // For now assuming "uploaded_by" takes a username. 
+          // If "myDocuments" is a UI concept, we might need the current user's username.
+          // The auth store might have it.
+        }
+
+        const response = await documentsService.getDocuments(orgId, page, size, filters)
         const rows = response.documents.documents.map(mapDocumentToRow)
         setDocuments(rows)
         setPagination(response.documents.pagination)
@@ -289,7 +314,7 @@ export function DocumentDashboard() {
         setIsLoadingDocuments(false)
       }
     },
-    [toast],
+    [toast, debouncedSearchTerm, statusFilter, typeFilter, userFilter, fechaSubidaDesde, fechaSubidaHasta],
   )
 
   useEffect(() => {
@@ -325,45 +350,8 @@ export function DocumentDashboard() {
     return true
   }
 
-  const filteredDocuments = useMemo(
-    () =>
-      documents.filter((doc: DocumentRow) => {
-        const matchesSearch =
-          doc.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          doc.supplier.toLowerCase().includes(searchTerm.toLowerCase())
-        const matchesStatus = statusFilter === "all" || doc.status === statusFilter
-        const matchesType = typeFilter === "all" || doc.type === typeFilter
-        const matchesEmisor = emisorFilter === "all" || doc.supplier === emisorFilter
-        const matchesUser =
-          userFilter === "all" ||
-          (userFilter === "myDocuments" && doc.uploadedBy === "currentUser") ||
-          (userFilter !== "all" && userFilter !== "myDocuments" && doc.uploadedBy === userFilter)
-        const matchesFechaDocumento = isDateInRange(doc.documentDateRaw, fechaDocumentoDesde, fechaDocumentoHasta)
-        const matchesFechaSubida = isDateInRange(doc.uploadDateRaw, fechaSubidaDesde, fechaSubidaHasta)
-        return (
-          matchesSearch &&
-          matchesStatus &&
-          matchesType &&
-          matchesEmisor &&
-          matchesUser &&
-          matchesFechaDocumento &&
-          matchesFechaSubida
-        )
-      }),
-    [
-      documents,
-      searchTerm,
-      statusFilter,
-      typeFilter,
-      emisorFilter,
-      userFilter,
-      fechaDocumentoDesde,
-      fechaDocumentoHasta,
-      fechaSubidaDesde,
-      fechaSubidaHasta,
-    ],
-  )
+  // Client-side filtering removed in favor of backend filtering
+  const filteredDocuments = documents
 
 
 

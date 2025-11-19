@@ -116,8 +116,31 @@ export const documentsService = {
         return response.json()
     },
 
-    async getDocuments(organizationId: number, page = 1, pageSize = 10): Promise<DocumentsResponse> {
-        const url = `${API_BASE_URL}/document/?page=${page}&organization_id=${organizationId}&page_size=${pageSize}`
+    async getDocuments(
+        organizationId: number,
+        page = 1,
+        pageSize = 10,
+        filters?: {
+            search?: string
+            date_start?: string
+            date_end?: string
+            status?: string
+            type?: string
+            uploaded_by?: string
+            is_trained?: string
+        },
+    ): Promise<DocumentsResponse> {
+        let url = `${API_BASE_URL}/document/?page=${page}&organization_id=${organizationId}&page_size=${pageSize}`
+
+        if (filters) {
+            if (filters.search) url += `&search=${encodeURIComponent(filters.search)}`
+            if (filters.date_start) url += `&date_start=${filters.date_start}`
+            if (filters.date_end) url += `&date_end=${filters.date_end}`
+            if (filters.status) url += `&status=${filters.status}`
+            if (filters.type) url += `&type=${filters.type}`
+            if (filters.uploaded_by) url += `&uploaded_by=${filters.uploaded_by}`
+            if (filters.is_trained) url += `&is_trained=${filters.is_trained}`
+        }
 
         const response = await fetch(url, {
             method: "GET",

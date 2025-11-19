@@ -1,0 +1,134 @@
+import { config } from "@/lib/config"
+
+const API_BASE_URL = config.apiBaseUrl
+
+type JournalEntry = {
+    id: number
+    document: number
+    status: string
+    train: boolean
+    ai: boolean
+    processed_for_fine_tuning: boolean
+    obs: string | null
+    human_input: unknown | null
+    date_create: string
+    normalized_journal_fields: Array<{
+        line_index: number
+        field: string
+        value: unknown
+    }>
+}
+
+export interface Document {
+    id: number
+    organization: number
+    organization_name: string
+    document_type: string
+    status: string
+    human_status: string
+    is_duplicate: boolean
+    date_document: string | null
+    document_url: string
+    document_name: string
+    journal_entries: JournalEntry[]
+    organization_container_name: string
+    data: Record<string, unknown> | null
+    extra_data: Record<string, unknown> | null
+    is_trained: boolean
+    uploaded_by_username: string | null
+}
+
+export interface DocumentsResponse {
+    message: string
+    documents: {
+        organization: string
+        container_name: string
+        organization_id: number
+        documents: Document[]
+        pagination: {
+            current_page: number
+            total_pages: number
+            page_size: number
+            total_items: number
+            has_next: boolean
+            has_previous: boolean
+            next_page: number | null
+            previous_page: number | null
+        }
+    }
+}
+
+export interface Organization {
+    id: number
+    name: string
+    enable: boolean
+    mail: string
+    posting_types: Array<{ id: number; name: string }>
+    document_types: Array<{ id: number; name: string; allow_duplicate_documents?: boolean }>
+    sas_uri: string | null
+    container_name: string
+}
+
+export interface OrganizationsResponse {
+    message: string
+    organizations: Organization[]
+}
+
+const withAuthHeaders = () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
+
+    if (!token) {
+        throw new Error("No hay token de autenticación")
+    }
+
+    return {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+    }
+}
+
+export const documentsService = {
+    async getOrganizations(): Promise<OrganizationsResponse> {
+        const response = await fetch(`${API_BASE_URL}/organization/`, {
+            method: "GET",
+            headers: withAuthHeaders(),
+        })
+
+        if (!response.ok) {
+            throw new Error("Error al obtener organizaciones")
+        }
+
+        return response.json()
+    },
+
+    async getDocuments(organizationId: number, page = 1, pageSize = 10): Promise<DocumentsResponse> {
+        const url = `${API_BASE_URL}/document/?page=${page}&organization_id=${organizationId}&page_size=${pageSize}`
+
+        const response = await fetch(url, {
+            method: "GET",
+            headers: withAuthHeaders(),
+        })
+
+        if (!response.ok) {
+            throw new Error("Error al obtener documentos")
+        }
+
+        return response.json()
+    },
+
+    async getDocumentById(documentId: number): Promise<Document> {
+        const url = `${API_BASE_URL}/document/?document_id=${documentId}`
+
+        const response = await fetch(url, {
+            method: "GET",
+            headers: withAuthHeaders(),
+        })
+
+        if (!response.ok) {
+            throw new Error("Error al obtener documento")
+        }
+
+        const data = await response.json()
+        return data.document
+    },
+}

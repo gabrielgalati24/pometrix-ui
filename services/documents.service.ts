@@ -128,6 +128,8 @@ export const documentsService = {
             type?: string
             uploaded_by?: string
             is_trained?: string
+            sortCol?: string
+            sortDir?: string
         },
     ): Promise<DocumentsResponse> {
         let url = `${API_BASE_URL}/document/?page=${page}&organization_id=${organizationId}&page_size=${pageSize}`
@@ -140,6 +142,8 @@ export const documentsService = {
             if (filters.type) url += `&type=${filters.type}`
             if (filters.uploaded_by) url += `&uploaded_by=${filters.uploaded_by}`
             if (filters.is_trained) url += `&is_trained=${filters.is_trained}`
+            if (filters.sortCol) url += `&sort_col=${filters.sortCol}`
+            if (filters.sortDir) url += `&sort_dir=${filters.sortDir}`
         }
 
         const response = await fetch(url, {

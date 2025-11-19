@@ -272,11 +272,13 @@ export function DocumentDashboard() {
     fechaSubidaDesde,
     fechaSubidaHasta,
     selectedOrganizationId,
+    sortColumn,
+    sortDirection,
   ])
 
   useEffect(() => {
     setSelectedDocuments(new Set())
-  }, [currentPage, pageSize, documents])
+  }, [currentPage, pageSize, documents, sortColumn, sortDirection])
 
   const loadDocuments = useCallback(
     async (orgId: number, page: number, size: number) => {
@@ -297,6 +299,8 @@ export function DocumentDashboard() {
           uploaded_by: userFilter !== "all" && userFilter !== "myDocuments" ? userFilter : undefined, // Adjust based on actual backend requirement for "myDocuments"
           date_start: fechaSubidaDesde || undefined,
           date_end: fechaSubidaHasta || undefined,
+          sortCol: sortColumn || undefined,
+          sortDir: sortDirection,
         }
 
         // Handle "myDocuments" special case if needed, or assume userFilter holds the username
@@ -322,7 +326,7 @@ export function DocumentDashboard() {
         setIsLoadingDocuments(false)
       }
     },
-    [toast, debouncedSearchTerm, statusFilter, typeFilter, userFilter, fechaSubidaDesde, fechaSubidaHasta],
+    [toast, debouncedSearchTerm, statusFilter, typeFilter, userFilter, fechaSubidaDesde, fechaSubidaHasta, sortColumn, sortDirection],
   )
 
   useEffect(() => {
@@ -383,51 +387,8 @@ export function DocumentDashboard() {
     )
   }
 
-  const sortedDocuments = useMemo(() => {
-    if (!sortColumn) return [...filteredDocuments]
-
-    return [...filteredDocuments].sort((a, b) => {
-      let aValue: unknown
-      let bValue: unknown
-
-      switch (sortColumn) {
-        case "id":
-          aValue = a.id
-          bValue = b.id
-          break
-        case "tipo":
-          aValue = a.type
-          bValue = b.type
-          break
-        case "emisor":
-          aValue = a.supplier
-          bValue = b.supplier
-          break
-        case "fechaDocumento":
-          aValue = parseToDate(a.documentDateRaw) ?? new Date(0)
-          bValue = parseToDate(b.documentDateRaw) ?? new Date(0)
-          break
-        case "fechaSubida":
-          aValue = parseToDate(a.uploadDateRaw) ?? new Date(0)
-          bValue = parseToDate(b.uploadDateRaw) ?? new Date(0)
-          break
-        case "estado":
-          aValue = a.status
-          bValue = b.status
-          break
-        case "archivo":
-          aValue = a.filename
-          bValue = b.filename
-          break
-        default:
-          return 0
-      }
-
-      if ((aValue as any) < (bValue as any)) return sortDirection === "asc" ? -1 : 1
-      if ((aValue as any) > (bValue as any)) return sortDirection === "asc" ? 1 : -1
-      return 0
-    })
-  }, [filteredDocuments, sortColumn, sortDirection])
+  // Client-side sorting removed in favor of backend sorting
+  const sortedDocuments = filteredDocuments
 
   const displayedDocuments = sortedDocuments
 
@@ -462,10 +423,8 @@ export function DocumentDashboard() {
     setCurrentPage(1)
   }
 
-  const totalPages = Math.ceil(displayedDocuments.length / pageSize)
-  const startIndex = (currentPage - 1) * pageSize
-  const endIndex = startIndex + pageSize
-  const paginatedDocuments = displayedDocuments.slice(startIndex, endIndex)
+  const totalPages = pagination?.total_pages ?? 0
+  const paginatedDocuments = displayedDocuments
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {

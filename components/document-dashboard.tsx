@@ -282,9 +282,17 @@ export function DocumentDashboard() {
     async (orgId: number, page: number, size: number) => {
       setIsLoadingDocuments(true)
       try {
+        const UI_STATUS_TO_API: Record<string, string> = {
+          "Para revisar": "REVIEW",
+          "Para confirmar": "POSTING",
+          "Confirmado": "CONFIRMED",
+          "Enviado": "EXPORT",
+          "Rechazado": "REJECTED",
+        }
+
         const filters = {
           search: debouncedSearchTerm || undefined,
-          status: statusFilter !== "all" ? statusFilter : undefined,
+          status: statusFilter !== "all" ? (UI_STATUS_TO_API[statusFilter] || statusFilter) : undefined,
           type: typeFilter !== "all" ? typeFilter : undefined,
           uploaded_by: userFilter !== "all" && userFilter !== "myDocuments" ? userFilter : undefined, // Adjust based on actual backend requirement for "myDocuments"
           date_start: fechaSubidaDesde || undefined,
@@ -294,7 +302,7 @@ export function DocumentDashboard() {
         // Handle "myDocuments" special case if needed, or assume userFilter holds the username
         if (userFilter === "myDocuments") {
           // If the backend expects a specific flag or username for "myDocuments", set it here.
-          // For now assuming "uploaded_by" takes a username. 
+          // For now assuming "uploaded_by" takes a username.
           // If "myDocuments" is a UI concept, we might need the current user's username.
           // The auth store might have it.
         }

@@ -1,14 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Checkbox } from "@/components/ui/checkbox"
+import { useRouter } from 'next/navigation'
 import {
   Upload,
   FileText,
@@ -42,6 +35,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useToast } from "@/hooks/use-toast"
 import { documentsService, type Document, type DocumentsResponse } from "@/services/documents.service"
 import { useOrganizationStore } from "@/store/organizationStore"
@@ -254,7 +254,6 @@ export function DocumentDashboard() {
       setCurrentPage(1)
     }
   }, [
-    currentPage,
     searchTerm,
     statusFilter,
     typeFilter,
@@ -328,7 +327,7 @@ export function DocumentDashboard() {
 
   const filteredDocuments = useMemo(
     () =>
-      documents.filter((doc) => {
+      documents.filter((doc: DocumentRow) => {
         const matchesSearch =
           doc.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
           doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -365,6 +364,28 @@ export function DocumentDashboard() {
       fechaSubidaHasta,
     ],
   )
+
+
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+    } else {
+      setSortColumn(column)
+      setSortDirection("asc")
+    }
+  }
+
+  const getSortIcon = (column: string) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="h-4 w-4 text-muted-foreground/40" />
+    }
+    return sortDirection === "asc" ? (
+      <ArrowUp className="h-4 w-4 text-muted-foreground" />
+    ) : (
+      <ArrowDown className="h-4 w-4 text-muted-foreground" />
+    )
+  }
 
   const sortedDocuments = useMemo(() => {
     if (!sortColumn) return [...filteredDocuments]
@@ -432,7 +453,7 @@ export function DocumentDashboard() {
     const now = new Date()
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
-    return documents.filter((doc) => {
+    return documents.filter((doc: DocumentRow) => {
       const uploadDate = parseToDate(doc.uploadDateRaw)
       return uploadDate ? uploadDate >= oneWeekAgo : false
     }).length
@@ -445,32 +466,10 @@ export function DocumentDashboard() {
     setCurrentPage(1)
   }
 
-  const handleSort = (column: string) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-    } else {
-      setSortColumn(column)
-      setSortDirection("asc")
-    }
-  }
-
-  const getSortIcon = (column: string) => {
-    if (sortColumn !== column) {
-      return <ArrowUpDown className="h-4 w-4 text-muted-foreground/40" />
-    }
-    return sortDirection === "asc" ? (
-      <ArrowUp className="h-4 w-4 text-muted-foreground" />
-    ) : (
-      <ArrowDown className="h-4 w-4 text-muted-foreground" />
-    )
-  }
-
-  const totalPages = pagination?.total_pages ?? 1
-  const currentPageDisplay = pagination?.current_page ?? currentPage
-  const pageSizeDisplay = pagination?.page_size ?? pageSize
-  const startIndex = totalDocuments === 0 ? 0 : (currentPageDisplay - 1) * pageSizeDisplay + 1
-  const endIndex = totalDocuments === 0 ? 0 : startIndex + displayedDocuments.length - 1
-  const paginatedDocuments = displayedDocuments
+  const totalPages = Math.ceil(displayedDocuments.length / pageSize)
+  const startIndex = (currentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedDocuments = displayedDocuments.slice(startIndex, endIndex)
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -493,48 +492,6 @@ export function DocumentDashboard() {
   const isAllSelected =
     paginatedDocuments.length > 0 && paginatedDocuments.every((doc) => selectedDocuments.has(doc.id))
   const isSomeSelected = selectedDocuments.size > 0 && !isAllSelected
-
-  const getSelectedDocumentsStatus = () => {
-    const docs = documents.filter((doc) => selectedDocuments.has(doc.id))
-    if (docs.length === 0) return null
-
-    const firstStatus = docs[0].status
-    const allSameStatus = docs.every((doc) => doc.status === firstStatus)
-
-    return allSameStatus ? firstStatus : "mixed"
-  }
-
-  const selectedStatus = getSelectedDocumentsStatus()
-
-  const handleConfirm = () => {
-    console.log("[v0] Confirmar:", Array.from(selectedDocuments))
-    // TODO: Implement confirm logic - change status to "Confirmado"
-  }
-
-  const handleReject = () => {
-    console.log("[v0] Rechazar:", Array.from(selectedDocuments))
-    // TODO: Implement reject logic - change status to "Rechazado"
-  }
-
-  const handleSend = () => {
-    console.log("[v0] Enviar:", Array.from(selectedDocuments))
-    // TODO: Implement send logic - change status to "Enviado"
-  }
-
-  const handleIndividualConfirm = (docId: string) => {
-    console.log("[v0] Confirmar individual:", docId)
-    // TODO: Implement individual confirm logic
-  }
-
-  const handleIndividualReject = (docId: string) => {
-    console.log("[v0] Rechazar individual:", docId)
-    // TODO: Implement individual reject logic
-  }
-
-  const handleIndividualSend = (docId: string) => {
-    console.log("[v0] Enviar individual:", docId)
-    // TODO: Implement individual send logic
-  }
 
   const handleReprocessReading = () => {
     console.log("[v0] Reprocesar lectura:", Array.from(selectedDocuments))
@@ -643,6 +600,48 @@ export function DocumentDashboard() {
     fechaDocumentoHasta !== "" ||
     fechaSubidaDesde !== "" ||
     fechaSubidaHasta !== ""
+
+  const getSelectedDocumentsStatus = () => {
+    const docs = documents.filter((doc) => selectedDocuments.has(doc.id))
+    if (docs.length === 0) return null
+
+    const firstStatus = docs[0].status
+    const allSameStatus = docs.every((doc) => doc.status === firstStatus)
+
+    return allSameStatus ? firstStatus : "mixed"
+  }
+
+  const selectedStatus = getSelectedDocumentsStatus()
+
+  const handleConfirm = () => {
+    console.log("[v0] Confirmar:", Array.from(selectedDocuments))
+    // TODO: Implement confirm logic - change status to "Confirmado"
+  }
+
+  const handleReject = () => {
+    console.log("[v0] Rechazar:", Array.from(selectedDocuments))
+    // TODO: Implement reject logic - change status to "Rechazado"
+  }
+
+  const handleSend = () => {
+    console.log("[v0] Enviar:", Array.from(selectedDocuments))
+    // TODO: Implement send logic - change status to "Enviado"
+  }
+
+  const handleIndividualConfirm = (docId: string) => {
+    console.log("[v0] Confirmar individual:", docId)
+    // TODO: Implement individual confirm logic
+  }
+
+  const handleIndividualReject = (docId: string) => {
+    console.log("[v0] Rechazar individual:", docId)
+    // TODO: Implement individual reject logic
+  }
+
+  const handleIndividualSend = (docId: string) => {
+    console.log("[v0] Enviar individual:", docId)
+    // TODO: Implement individual send logic
+  }
 
   if (isLoading && !isAuthenticated) {
     return (
@@ -808,7 +807,7 @@ export function DocumentDashboard() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todos</SelectItem>
-                      {uniqueEmisores.map((emisor) => (
+                      {uniqueEmisores.map((emisor: string) => (
                         <SelectItem key={emisor} value={emisor}>
                           {emisor}
                         </SelectItem>
@@ -957,18 +956,14 @@ export function DocumentDashboard() {
                   <Download className="h-4 w-4 mr-2" />
                   Exportar
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleDelete}
-                  className="text-destructive hover:bg-destructive/10"
-                >
+                <Button variant="outline" size="sm" onClick={handleDelete} className="text-destructive hover:bg-destructive/10">
                   <Trash2 className="h-4 w-4 mr-2" />
                   Eliminar
                 </Button>
               </div>
             </div>
           )}
+
           <TooltipProvider>
             <Table>
               <TableHeader>
@@ -1065,7 +1060,7 @@ export function DocumentDashboard() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedDocuments.map((doc) => (
+                  paginatedDocuments.map((doc: DocumentRow) => (
                     <TableRow
                       key={doc.id}
                       onClick={() => router.push(`/document/${doc.id}`)}
@@ -1195,8 +1190,8 @@ export function DocumentDashboard() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handlePageChange(currentPageDisplay - 1)}
-                  disabled={currentPageDisplay === 1}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
                 >
                   Anterior
                 </Button>
@@ -1216,7 +1211,7 @@ export function DocumentDashboard() {
                         variant="outline"
                         size="sm"
                         onClick={() => handlePageChange(page as number)}
-                        className={`w-9 ${currentPageDisplay === page ? "bg-muted font-semibold" : ""}`}
+                        className={`w-9 ${currentPage === page ? "bg-muted font-semibold" : ""}`}
                       >
                         {page}
                       </Button>
@@ -1227,8 +1222,8 @@ export function DocumentDashboard() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handlePageChange(currentPageDisplay + 1)}
-                  disabled={currentPageDisplay === totalPages}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
                 >
                   Siguiente
                 </Button>

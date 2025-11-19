@@ -14,17 +14,16 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Settings, User, LogOut, Users, Database, Building2, Bot } from "lucide-react"
 import { useAuthStore } from "@/store/authStore"
+import { useOrganizationStore } from "@/store/organizationStore"
 
 export function AppHeader() {
   const router = useRouter()
   const { logout, user } = useAuthStore()
-  const [selectedOrg, setSelectedOrg] = useState("org-1")
+  const { organizations, selectedOrganizationId, setSelectedOrganization } = useOrganizationStore()
 
-  const organizations = [
-    { id: "org-1", name: "Organización Principal" },
-    { id: "org-2", name: "Organización Secundaria" },
-    { id: "org-3", name: "Organización de Prueba" },
-  ]
+  const handleOrganizationChange = (value: string) => {
+    setSelectedOrganization(Number(value))
+  }
 
   const handleLogout = async () => {
     await logout()
@@ -41,14 +40,18 @@ export function AppHeader() {
             className="h-8 invert"
           />
 
-          <Select value={selectedOrg} onValueChange={setSelectedOrg}>
+          <Select
+            value={selectedOrganizationId?.toString()}
+            onValueChange={handleOrganizationChange}
+            disabled={organizations.length === 0}
+          >
             <SelectTrigger className="w-[240px]">
               <Building2 className="h-4 w-4 mr-2" />
               <SelectValue placeholder="Seleccionar organización" />
             </SelectTrigger>
             <SelectContent>
               {organizations.map((org) => (
-                <SelectItem key={org.id} value={org.id}>
+                <SelectItem key={org.id} value={org.id.toString()}>
                   {org.name}
                 </SelectItem>
               ))}

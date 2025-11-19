@@ -394,6 +394,137 @@ export function DocumentResults({
     }
   }
 
+  const handleReprocessData = async () => {
+    setIsProcessingData(true)
+    console.log("[v0] Reprocesando datos extraídos...")
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    setIsProcessingData(false)
+    console.log("[v0] Datos reprocesados")
+  }
+
+  const handleReprocessResult = async () => {
+    setIsProcessingResult(true)
+    console.log("[v0] Reprocesar Asistente...")
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    setIsProcessingResult(false)
+    console.log("[v0] Asistente reprocesado")
+  }
+
+  const handleEditDatosGenerales = () => {
+    setOriginalDatosGeneralesDatos({ ...datosGeneralesDatos })
+    setIsEditingDatosGenerales(true)
+  }
+
+  const handleSaveDatosGenerales = () => {
+    console.log("[v0] Guardando cambios en datos generales...")
+    setIsEditingDatosGenerales(false)
+  }
+
+  const handleCancelDatosGenerales = () => {
+    setDatosGeneralesDatos(originalDatosGeneralesDatos)
+    setIsEditingDatosGenerales(false)
+  }
+
+  const handleEditDatosTable = () => {
+    setOriginalDatosData(JSON.parse(JSON.stringify(datosTableData)))
+    setIsEditingDatosTable(true)
+  }
+
+  const handleSaveDatosTable = () => {
+    console.log("[v0] Guardando cambios en tabla de datos...")
+    setIsEditingDatosTable(false)
+    setOriginalDatosData([])
+  }
+
+  const handleCancelDatosTable = () => {
+    setDatosTableData(originalDatosData)
+    setIsEditingDatosTable(false)
+    setOriginalDatosData([])
+  }
+
+  const handleEditResultadoGenerales = () => {
+    setOriginalDatosGeneralesResultado({ ...datosGeneralesResultado })
+    setIsEditingResultadoGenerales(true)
+  }
+
+  const handleSaveResultadoGenerales = () => {
+    console.log("[v0] Guardando cambios en datos generales del resultado...")
+    setIsEditingResultadoGenerales(false)
+  }
+
+  const handleCancelResultadoGenerales = () => {
+    setDatosGeneralesResultado(originalDatosGeneralesResultado)
+    setIsEditingResultadoGenerales(false)
+  }
+
+  const handleEditResultadoTable = () => {
+    setOriginalResultadoData(JSON.parse(JSON.stringify(resultadoTableData)))
+    setAssistantInstructions("")
+    setIsEditingResultadoTable(true)
+  }
+
+  const handleSaveResultadoTable = () => {
+    if (useForRetraining) {
+      console.log("[v0] Guardando cambios y reentrando asistente...")
+      console.log("[v0] Instrucciones:", assistantInstructions)
+      console.log("[v0] Cambios en tabla:", resultadoTableData)
+    } else {
+      console.log("[v0] Guardando cambios en tabla de resultado...")
+    }
+    setIsEditingResultadoTable(false)
+    setOriginalResultadoData([])
+    setAssistantInstructions("")
+    setUseForRetraining(false)
+  }
+
+  const handleCancelResultadoTable = () => {
+    setResultadoTableData(originalResultadoData)
+    setIsEditingResultadoTable(false)
+    setOriginalResultadoData([])
+    setAssistantInstructions("")
+    setUseForRetraining(false)
+  }
+
+  const handleCellChangeDatos = (rowIdx: number, colIdx: number, value: string) => {
+    setDatosTableData((prev) => {
+      const newData = [...prev]
+      newData[rowIdx][colIdx] = value
+      return newData
+    })
+  }
+
+  const handleCellChangeResultado = (rowIdx: number, colIdx: number, value: string) => {
+    setResultadoTableData((prev) => {
+      const newData = [...prev]
+      newData[rowIdx][colIdx] = value
+      return newData
+    })
+  }
+
+  const handleDatosColumnDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (active && over && active.id !== over.id) {
+      setDatosColumnOrder((order) => {
+        const oldIndex = order.indexOf(active.id as string)
+        const newIndex = order.indexOf(over.id as string)
+        return arrayMove(order, oldIndex, newIndex)
+      })
+    }
+  }
+
+  const handleResultadoColumnDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (active && over && active.id !== over.id) {
+      setResultadoColumnOrder((order) => {
+        const oldIndex = order.indexOf(active.id as string)
+        const newIndex = order.indexOf(over.id as string)
+        return arrayMove(order, oldIndex, newIndex)
+      })
+    }
+  }
+
   // --- Render Helpers ---
 
   const getStatusBadge = (status: string) => {
@@ -492,10 +623,6 @@ export function DocumentResults({
     )
   }
 
-  // ... (Render Datos and Resultado views similar to user code but using state)
-  // For brevity in this plan, I'll implement them fully in the file write.
-
-  // Re-implementing renderDatosView and renderResultadoView with the state variables
   const renderDatosView = (context: "consolidated" | "main" | "related", docIndex?: number) => (
     <Card className="h-full flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 shrink-0">
@@ -504,95 +631,462 @@ export function DocumentResults({
           Datos Extraídos
         </CardTitle>
         <div className="flex gap-1">
-          <Button variant="ghost" size="sm" onClick={() => toggleExpand("datos")}>
-            {expandedView === "datos" ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={handleReprocessData} disabled={isProcessingData}>
+                {isProcessingData ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+              Reprocesar lectura
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={() => toggleExpand("datos")}>
+                {expandedView === "datos" ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+              {expandedView === "datos" ? "Contraer" : "Ampliar"}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </CardHeader>
       <CardContent className="space-y-6 flex-1 overflow-auto">
         {/* Datos Generales Form */}
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase">Datos Generales</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase">Datos Generales</h3>
+            <div className="flex gap-1">
+              {!isEditingDatosGenerales ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="sm" onClick={handleEditDatosGenerales}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                    Editar
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={handleCancelDatosGenerales}>
+                    Cancelar
+                  </Button>
+                  <Button variant="default" size="sm" onClick={handleSaveDatosGenerales}>
+                    Guardar
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Proveedor</p>
-              <p className="text-sm">{datosGeneralesDatos.proveedor}</p>
+              {isEditingDatosGenerales ? (
+                <input
+                  type="text"
+                  value={datosGeneralesDatos.proveedor}
+                  onChange={(e) => setDatosGeneralesDatos({ ...datosGeneralesDatos, proveedor: e.target.value })}
+                  className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              ) : (
+                <p className="text-sm">{datosGeneralesDatos.proveedor}</p>
+              )}
             </div>
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Número Factura</p>
-              <p className="text-sm">{datosGeneralesDatos.numeroFactura}</p>
+              {isEditingDatosGenerales ? (
+                <input
+                  type="text"
+                  value={datosGeneralesDatos.numeroFactura}
+                  onChange={(e) => setDatosGeneralesDatos({ ...datosGeneralesDatos, numeroFactura: e.target.value })}
+                  className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              ) : (
+                <p className="text-sm">{datosGeneralesDatos.numeroFactura}</p>
+              )}
             </div>
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Fecha</p>
-              <p className="text-sm">{datosGeneralesDatos.fecha}</p>
+              {isEditingDatosGenerales ? (
+                <input
+                  type="text"
+                  value={datosGeneralesDatos.fecha}
+                  onChange={(e) => setDatosGeneralesDatos({ ...datosGeneralesDatos, fecha: e.target.value })}
+                  className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              ) : (
+                <p className="text-sm">{datosGeneralesDatos.fecha}</p>
+              )}
             </div>
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Total</p>
-              <p className="text-sm">{datosGeneralesDatos.total}</p>
+              {isEditingDatosGenerales ? (
+                <input
+                  type="text"
+                  value={datosGeneralesDatos.total}
+                  onChange={(e) => setDatosGeneralesDatos({ ...datosGeneralesDatos, total: e.target.value })}
+                  className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              ) : (
+                <p className="text-sm">{datosGeneralesDatos.total}</p>
+              )}
             </div>
           </div>
         </div>
 
         {/* Detalle Table */}
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase">DETALLE</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase">DETALLE</h3>
+            <div className="flex gap-1">
+              {!isEditingDatosTable ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="sm" onClick={handleEditDatosTable}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                    Editar
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={handleCancelDatosTable}>
+                    Cancelar
+                  </Button>
+                  <Button variant="default" size="sm" onClick={handleSaveDatosTable}>
+                    Guardar
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
           <div className="border rounded-lg overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted">
-                <tr>
-                  {datosColumnOrder.map(h => <th key={h} className="p-2 text-left font-medium whitespace-nowrap">{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {datosTableData.map((row, idx) => (
-                  <tr key={idx} className="border-t">
-                    {row.map((cell, cIdx) => <td key={cIdx} className="p-2 whitespace-nowrap">{cell}</td>)}
+            <DndContext
+              id={datosDndId}
+              collisionDetection={closestCenter}
+              modifiers={[restrictToHorizontalAxis]}
+              onDragEnd={handleDatosColumnDragEnd}
+              sensors={sensors}
+            >
+              <table className="w-full text-sm">
+                <thead className="bg-muted">
+                  <tr>
+                    <SortableContext items={datosColumnOrder} strategy={horizontalListSortingStrategy}>
+                      {datosColumnOrder.map((header) => (
+                        <DraggableTableHeader key={header} header={header}>
+                          {header}
+                        </DraggableTableHeader>
+                      ))}
+                    </SortableContext>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {datosTableData.map((row, rowIdx) => (
+                    <tr key={rowIdx} className="border-t">
+                      {datosColumnOrder.map((header, colIdx) => {
+                        // Map header to original index logic here if needed, assuming simple mapping for now
+                        // Or map based on known columns
+                        const originalColIdx = [
+                          "Código", "Descripción", "Cantidad", "P. Unitario", "Subtotal", "IVA 21%", "Total"
+                        ].indexOf(header)
+                        const cell = row[originalColIdx] || "" // Fallback
+                        return (
+                          <td key={colIdx} className="p-2 whitespace-nowrap">
+                            {isEditingDatosTable ? (
+                              <input
+                                type="text"
+                                value={cell}
+                                onChange={(e) => handleCellChangeDatos(rowIdx, originalColIdx, e.target.value)}
+                                className="w-full px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                              />
+                            ) : (
+                              cell
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </DndContext>
           </div>
         </div>
       </CardContent>
     </Card>
   )
 
-  const renderResultadoView = (context: "consolidated" | "main" | "related", docIndex?: number) => (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 shrink-0">
-        <CardTitle className="flex items-center gap-2">
-          <FileOutput className="h-5 w-5" />
-          Resultado del Asistente
-        </CardTitle>
-        <div className="flex gap-1">
-          <Button variant="ghost" size="sm" onClick={() => toggleExpand("resultado")}>
-            {expandedView === "resultado" ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6 flex-1 overflow-auto">
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase">Datos de salida</h3>
-          <div className="border rounded-lg overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted sticky top-0">
-                <tr>
-                  {resultadoColumnOrder.map(h => <th key={h} className="p-2 text-left font-medium whitespace-nowrap">{h}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {resultadoTableData.map((row, idx) => (
-                  <tr key={idx} className="border-t">
-                    {row.map((cell, cIdx) => <td key={cIdx} className="p-2 whitespace-nowrap">{cell}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+  const renderResultadoView = (context: "consolidated" | "main" | "related", docIndex?: number) => {
+    const handleViewReasoning = () => {
+      if (currentReasoning) {
+        setShowReasoningModal(true)
+      }
+    }
+
+    return (
+      <Card className="h-full flex flex-col">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 shrink-0">
+          <CardTitle className="flex items-center gap-2">
+            <FileOutput className="h-5 w-5" />
+            Resultado del Asistente
+          </CardTitle>
+          <div className="flex gap-1">
+            {currentReasoning && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" onClick={handleViewReasoning}>
+                    <Brain className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                  Ver razonamiento del Asistente
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={handleReprocessResult} disabled={isProcessingResult}>
+                  {isProcessingResult ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                Reprocesar Asistente
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <Button variant="ghost" size="sm" onClick={() => toggleExpand("resultado")}>
+                {expandedView === "resultado" ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </Button>
+            </Tooltip>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
+        </CardHeader>
+        <CardContent className="space-y-6 flex-1 overflow-auto">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase">Datos Generales</h3>
+              <div className="flex gap-1">
+                {!isEditingResultadoGenerales ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="sm" onClick={handleEditResultadoGenerales}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                      Editar
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <>
+                    <Button variant="outline" size="sm" onClick={handleCancelResultadoGenerales}>
+                      Cancelar
+                    </Button>
+                    <Button variant="default" size="sm" onClick={handleSaveResultadoGenerales}>
+                      Guardar
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Documento</p>
+                {isEditingResultadoGenerales ? (
+                  <input
+                    type="text"
+                    value={datosGeneralesResultado.documento}
+                    onChange={(e) =>
+                      setDatosGeneralesResultado({ ...datosGeneralesResultado, documento: e.target.value })
+                    }
+                    className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                ) : (
+                  <p className="text-sm">{datosGeneralesResultado.documento}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Estado</p>
+                {isEditingResultadoGenerales ? (
+                  <input
+                    type="text"
+                    value={datosGeneralesResultado.estado}
+                    onChange={(e) => setDatosGeneralesResultado({ ...datosGeneralesResultado, estado: e.target.value })}
+                    className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                ) : (
+                  <p className="text-sm">{datosGeneralesResultado.estado}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Total Debe</p>
+                {isEditingResultadoGenerales ? (
+                  <input
+                    type="text"
+                    value={datosGeneralesResultado.totalDebe}
+                    onChange={(e) =>
+                      setDatosGeneralesResultado({ ...datosGeneralesResultado, totalDebe: e.target.value })
+                    }
+                    className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                ) : (
+                  <p className="text-sm">{datosGeneralesResultado.totalDebe}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Total Haber</p>
+                {isEditingResultadoGenerales ? (
+                  <input
+                    type="text"
+                    value={datosGeneralesResultado.totalHaber}
+                    onChange={(e) =>
+                      setDatosGeneralesResultado({ ...datosGeneralesResultado, totalHaber: e.target.value })
+                    }
+                    className="w-full px-2 py-1 text-sm border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                ) : (
+                  <p className="text-sm">{datosGeneralesResultado.totalHaber}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <button
+              onClick={() => setFuentesExpanded(!fuentesExpanded)}
+              className="flex items-center text-sm font-medium hover:text-primary transition-colors gap-2"
+            >
+              <ChevronRight className={`h-4 w-4 transition-transform ${fuentesExpanded ? "rotate-90" : ""}`} />
+              Fuentes de datos adicionales
+            </button>
+            {fuentesExpanded && (
+              <div className="ml-6 space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">Master Data - Plan de Cuentas 2024</span>
+                  <button className="text-primary hover:underline">Ver detalle</button>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">API ERP - Datos de Proveedor</span>
+                  <button className="text-primary hover:underline">Ver detalle</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase">Datos de salida</h3>
+              <div className="flex gap-1">
+                {!isEditingResultadoTable ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="sm" onClick={handleEditResultadoTable}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                      Editar
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <>
+                    <Button variant="outline" size="sm" onClick={handleCancelResultadoTable}>
+                      Cancelar
+                    </Button>
+                    <Button variant="default" size="sm" onClick={handleSaveResultadoTable}>
+                      Guardar
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {isEditingResultadoTable && (
+              <div className="space-y-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground">Instrucciones para el asistente</label>
+                  <textarea
+                    value={assistantInstructions}
+                    onChange={(e) => setAssistantInstructions(e.target.value)}
+                    placeholder="Ej: Redondear siempre a dos decimales, usar formato de fecha DD/MM/YYYY..."
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary min-h-[80px] resize-y text-xs"
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="retrain"
+                    checked={useForRetraining}
+                    onCheckedChange={(checked) => setUseForRetraining(checked === true)}
+                  />
+                  <label
+                    htmlFor="retrain"
+                    className="text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    Utilizar cambios para reentrenar el asistente
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="border rounded-lg overflow-auto max-h-[400px]">
+              <DndContext
+                id={resultadoDndId}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToHorizontalAxis]}
+                onDragEnd={handleResultadoColumnDragEnd}
+                sensors={sensors}
+              >
+                <table className="w-full text-sm">
+                  <thead className="bg-muted sticky top-0">
+                    <tr>
+                      <SortableContext items={resultadoColumnOrder} strategy={horizontalListSortingStrategy}>
+                        {resultadoColumnOrder.map((header) => (
+                          <DraggableTableHeader key={header} header={header}>
+                            {header}
+                          </DraggableTableHeader>
+                        ))}
+                      </SortableContext>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultadoTableData.map((row, rowIdx) => (
+                      <tr key={rowIdx} className="border-t">
+                        {resultadoColumnOrder.map((header, colIdx) => {
+                          const originalColIdx = [
+                            "Línea", "Cód. Cuenta", "Nombre Cuenta", "Debe", "Haber", "Centro Costo", "Proyecto", "Cód. Fiscal", "Referencia"
+                          ].indexOf(header)
+                          const cell = row[originalColIdx] || ""
+                          return (
+                            <td key={colIdx} className="p-2 whitespace-nowrap">
+                              {isEditingResultadoTable ? (
+                                <input
+                                  type="text"
+                                  value={cell}
+                                  onChange={(e) => handleCellChangeResultado(rowIdx, originalColIdx, e.target.value)}
+                                  className="w-full px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                                />
+                              ) : (
+                                cell
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </DndContext>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   const renderViewColumns = (context: "consolidated" | "main" | "related", docIndex?: number) => {
     const orderedViews: ViewMode[] = ["documento", "datos", "resultado"]
@@ -634,8 +1128,63 @@ export function DocumentResults({
                 {getStatusBadge(documentStatus)}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" onClick={handleConfirm} className="text-green-600"><CheckCircle className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="sm" onClick={handleReject} className="text-destructive"><XCircle className="h-4 w-4" /></Button>
+                {(documentStatus === "Para revisar" || documentStatus === "Para confirmar") && (
+                  <>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="sm" onClick={handleConfirm} className="text-green-600 hover:bg-green-600/10">
+                          <CheckCircle className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                        Confirmar
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="sm" onClick={handleReject} className="text-destructive hover:bg-destructive/10">
+                          <XCircle className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                        Rechazar
+                      </TooltipContent>
+                    </Tooltip>
+                  </>
+                )}
+                {documentStatus === "Confirmado" && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="sm" onClick={handleSend} className="text-green-600 hover:bg-green-600/10">
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                      Enviar
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="sm" onClick={handleExport}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                    Exportar
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="sm" onClick={handleDelete}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-background text-foreground border shadow-lg" side="top">
+                    Eliminar
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
           </div>
@@ -681,6 +1230,78 @@ export function DocumentResults({
             ))}
           </Tabs>
         </div>
+
+        {/* AI Reasoning Modal */}
+        <Dialog open={showReasoningModal} onOpenChange={setShowReasoningModal}>
+          <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Brain className="h-5 w-5" />
+                Razonamiento del Asistente IA
+              </DialogTitle>
+              <DialogDescription>Proceso de análisis y generación del resultado contable</DialogDescription>
+            </DialogHeader>
+
+            {currentReasoning && (
+              <div className="space-y-6 mt-4">
+                {/* Summary Section */}
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-sm">Resumen</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{currentReasoning.summary}</p>
+                </div>
+
+                {/* Processing Steps */}
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm">Pasos de Procesamiento</h3>
+                  <div className="space-y-2">
+                    {currentReasoning.steps.map((step: string, idx: number) => (
+                      <div key={idx} className="flex gap-2 text-sm">
+                        <CheckCircle2 className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <span className="text-muted-foreground">{step}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Data Sources - Only for consolidated view */}
+                {currentReasoning.dataSources && (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm">Fuentes de Datos Utilizadas</h3>
+                    <div className="space-y-2">
+                      {currentReasoning.dataSources.map((source: any, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between p-2 bg-muted rounded-lg">
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-medium">{source.name}</p>
+                            <p className="text-xs text-muted-foreground">{source.recordsUsed} registros utilizados</p>
+                          </div>
+                          <div className="flex items-center gap-1 text-xs text-green-600">
+                            <CheckCircle2 className="h-3 w-3" />
+                            {source.status}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Confidence Score */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-sm">Nivel de Confianza</h3>
+                    <span className="text-sm font-medium">{currentReasoning.confidence}%</span>
+                  </div>
+                  <Progress value={currentReasoning.confidence} className="h-2" />
+                </div>
+
+                {/* Data Quality */}
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-sm">Calidad de Datos</h3>
+                  <p className="text-sm text-muted-foreground">{currentReasoning.dataQuality}</p>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   )

@@ -74,6 +74,21 @@ export interface OrganizationsResponse {
     organizations: Organization[]
 }
 
+export interface DocumentGroup {
+    group_id: number
+    reference_key: string
+    created_at: string
+    main_document: Document
+    related_documents: Document[]
+    journal_entry_context: unknown | null
+}
+
+export interface DocumentWithGroup {
+    message: string
+    document: Document
+    document_group: DocumentGroup | null
+}
+
 const withAuthHeaders = () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
 
@@ -116,7 +131,7 @@ export const documentsService = {
         return response.json()
     },
 
-    async getDocumentById(documentId: number): Promise<Document> {
+    async getDocumentById(documentId: number): Promise<DocumentWithGroup> {
         const url = `${API_BASE_URL}/document/?document_id=${documentId}`
 
         const response = await fetch(url, {
@@ -128,7 +143,6 @@ export const documentsService = {
             throw new Error("Error al obtener documento")
         }
 
-        const data = await response.json()
-        return data.document
+        return response.json()
     },
 }

@@ -198,7 +198,7 @@ const getStatusBadge = (status: string) => {
 
 export function DocumentDashboard() {
   const router = useRouter()
-  const { verifyToken, isAuthenticated, isLoading } = useAuthStore()
+  const { initialize, isAuthenticated, isLoading, isInitialized } = useAuthStore()
   const fetchOrganizations = useOrganizationStore((state) => state.fetchOrganizations)
   const selectedOrganizationId = useOrganizationStore((state) => state.selectedOrganizationId)
   const isLoadingOrganizations = useOrganizationStore((state) => state.isLoadingOrganizations)
@@ -224,17 +224,17 @@ export function DocumentDashboard() {
   const [pagination, setPagination] = useState<Pagination | null>(null)
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
 
+  // Initialize auth on mount
   useEffect(() => {
-    if (!isAuthenticated && !isLoading) {
-      verifyToken()
-    }
-  }, [verifyToken, isAuthenticated, isLoading])
+    initialize()
+  }, [initialize])
 
+  // Redirect to login only after initialization is complete
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (isInitialized && !isAuthenticated && !isLoading) {
       router.push("/login")
     }
-  }, [isLoading, isAuthenticated, router])
+  }, [isInitialized, isAuthenticated, isLoading, router])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -598,7 +598,7 @@ export function DocumentDashboard() {
     // TODO: Implement individual send logic
   }
 
-  if (isLoading && !isAuthenticated) {
+  if (!isInitialized) {
     return (
       <div className="container mx-auto p-6 flex items-center justify-center min-h-[400px]">
         <div className="text-center">

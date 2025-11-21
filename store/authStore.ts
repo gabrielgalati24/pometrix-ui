@@ -8,19 +8,22 @@ interface AuthState {
   isLoading: boolean
   error: string | null
   isAuthenticated: boolean
+  isInitialized: boolean
 
   login: (credentials: LoginCredentials) => Promise<void>
   logout: () => Promise<void>
   verifyToken: () => Promise<void>
+  initialize: () => Promise<void>
   clearError: () => void
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isLoading: false,
   error: null,
   isAuthenticated: false,
+  isInitialized: false,
 
   login: async (credentials) => {
     set({ isLoading: true, error: null })
@@ -59,10 +62,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  verifyToken: async () => {
+  initialize: async () => {
     const token = localStorage.getItem("access_token")
     if (!token) {
-      set({ isAuthenticated: false })
+      set({ isAuthenticated: false, isInitialized: true })
       return
     }
 
@@ -74,6 +77,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         token: response.token,
         isAuthenticated: true,
         isLoading: false,
+        isInitialized: true,
       })
     } catch {
       set({
@@ -81,6 +85,37 @@ export const useAuthStore = create<AuthState>((set) => ({
         token: null,
         isAuthenticated: false,
         isLoading: false,
+        isInitialized: true,
+      })
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("refresh_token")
+    }
+  },
+
+  verifyToken: async () => {
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      set({ isAuthenticated: false, isInitialized: true })
+      return
+    }
+
+    set({ isLoading: true })
+    try {
+      const response = await authService.verifyToken(token)
+      set({
+        user: response.user,
+        token: response.token,
+        isAuthenticated: true,
+        isLoading: false,
+        isInitialized: true,
+      })
+    } catch {
+      set({
+        user: null,
+        token: null,
+        isAuthenticated: false,
+        isLoading: false,
+        isInitialized: true,
       })
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")

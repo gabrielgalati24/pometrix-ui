@@ -206,6 +206,7 @@ export function DocumentDashboard() {
   const { initialize, isAuthenticated, isLoading, isInitialized } = useAuthStore()
   const fetchOrganizations = useOrganizationStore((state) => state.fetchOrganizations)
   const selectedOrganizationId = useOrganizationStore((state) => state.selectedOrganizationId)
+  const setSelectedOrganization = useOrganizationStore((state) => state.setSelectedOrganization)
   const isLoadingOrganizations = useOrganizationStore((state) => state.isLoadingOrganizations)
   const organizationsError = useOrganizationStore((state) => state.error)
   const { toast } = useToast()
@@ -258,7 +259,12 @@ export function DocumentDashboard() {
     setCurrentPage(Number(searchParams.get("page")) || 1)
     setPageSize(Number(searchParams.get("pageSize")) || 10)
     setShowAdvancedFilters(searchParams.get("advancedFilters") === "true")
-  }, [searchParams])
+
+    const orgIdParam = searchParams.get("organizationId")
+    if (orgIdParam) {
+      setSelectedOrganization(Number(orgIdParam))
+    }
+  }, [searchParams, setSelectedOrganization])
 
   // Sync state to URL parameters
   useEffect(() => {
@@ -280,6 +286,7 @@ export function DocumentDashboard() {
     if (currentPage !== 1) params.set("page", currentPage.toString())
     if (pageSize !== 10) params.set("pageSize", pageSize.toString())
     if (showAdvancedFilters) params.set("advancedFilters", "true")
+    if (selectedOrganizationId) params.set("organizationId", selectedOrganizationId.toString())
 
     const queryString = params.toString()
     const newUrl = queryString ? `${pathname}?${queryString}` : pathname
@@ -301,6 +308,7 @@ export function DocumentDashboard() {
     currentPage,
     pageSize,
     showAdvancedFilters,
+    selectedOrganizationId,
     pathname,
     router,
   ])

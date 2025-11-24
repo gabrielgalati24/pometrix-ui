@@ -1,7 +1,9 @@
 "use client"
 
+import { DashboardSkeleton } from "@/components/dashboard-skeleton"
+
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import {
   Upload,
   FileText,
@@ -42,6 +44,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
 import { documentsService, type Document, type DocumentsResponse } from "@/services/documents.service"
 import { useOrganizationStore } from "@/store/organizationStore"
@@ -198,36 +201,109 @@ const getStatusBadge = (status: string) => {
 
 export function DocumentDashboard() {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { initialize, isAuthenticated, isLoading, isInitialized } = useAuthStore()
   const fetchOrganizations = useOrganizationStore((state) => state.fetchOrganizations)
   const selectedOrganizationId = useOrganizationStore((state) => state.selectedOrganizationId)
   const isLoadingOrganizations = useOrganizationStore((state) => state.isLoadingOrganizations)
   const organizationsError = useOrganizationStore((state) => state.error)
   const { toast } = useToast()
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [typeFilter, setTypeFilter] = useState("all")
-  const [emisorFilter, setEmisorFilter] = useState("all")
-  const [userFilter, setUserFilter] = useState("all")
-  const [fechaDocumentoDesde, setFechaDocumentoDesde] = useState("")
-  const [fechaDocumentoHasta, setFechaDocumentoHasta] = useState("")
-  const [fechaSubidaDesde, setFechaSubidaDesde] = useState("")
-  const [fechaSubidaHasta, setFechaSubidaHasta] = useState("")
-  const [sortColumn, setSortColumn] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
+
+  // Initialize state from URL parameters
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "")
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "all")
+  const [typeFilter, setTypeFilter] = useState(searchParams.get("type") || "all")
+  const [emisorFilter, setEmisorFilter] = useState(searchParams.get("emisor") || "all")
+  const [userFilter, setUserFilter] = useState(searchParams.get("user") || "all")
+  const [fechaDocumentoDesde, setFechaDocumentoDesde] = useState(searchParams.get("fechaDocDesde") || "")
+  const [fechaDocumentoHasta, setFechaDocumentoHasta] = useState(searchParams.get("fechaDocHasta") || "")
+  const [fechaSubidaDesde, setFechaSubidaDesde] = useState(searchParams.get("fechaSubDesde") || "")
+  const [fechaSubidaHasta, setFechaSubidaHasta] = useState(searchParams.get("fechaSubHasta") || "")
+  const [sortColumn, setSortColumn] = useState<string | null>(searchParams.get("sortCol"))
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">((searchParams.get("sortDir") as "asc" | "desc") || "asc")
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set())
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  const [currentPage, setCurrentPage] = useState(Number(searchParams.get("page")) || 1)
+  const [pageSize, setPageSize] = useState(Number(searchParams.get("pageSize")) || 10)
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(searchParams.get("advancedFilters") === "true")
   const [documents, setDocuments] = useState<DocumentRow[]>([])
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
   const [pagination, setPagination] = useState<Pagination | null>(null)
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchParams.get("search") || "")
 
   // Initialize auth on mount
   useEffect(() => {
     initialize()
   }, [initialize])
+
+  // Sync URL parameters to state (for browser back/forward)
+  useEffect(() => {
+    if (isInitialLoad) {
+      setIsInitialLoad(false)
+      return
+    }
+
+    setSearchTerm(searchParams.get("search") || "")
+    setStatusFilter(searchParams.get("status") || "all")
+    setTypeFilter(searchParams.get("type") || "all")
+    setEmisorFilter(searchParams.get("emisor") || "all")
+    setUserFilter(searchParams.get("user") || "all")
+    setFechaDocumentoDesde(searchParams.get("fechaDocDesde") || "")
+    setFechaDocumentoHasta(searchParams.get("fechaDocHasta") || "")
+    setFechaSubidaDesde(searchParams.get("fechaSubDesde") || "")
+    setFechaSubidaHasta(searchParams.get("fechaSubHasta") || "")
+    setSortColumn(searchParams.get("sortCol"))
+    setSortDirection((searchParams.get("sortDir") as "asc" | "desc") || "asc")
+    setCurrentPage(Number(searchParams.get("page")) || 1)
+    setPageSize(Number(searchParams.get("pageSize")) || 10)
+    setShowAdvancedFilters(searchParams.get("advancedFilters") === "true")
+  }, [searchParams])
+
+  // Sync state to URL parameters
+  useEffect(() => {
+    if (isInitialLoad) return
+
+    const params = new URLSearchParams()
+
+    if (searchTerm) params.set("search", searchTerm)
+    if (statusFilter !== "all") params.set("status", statusFilter)
+    if (typeFilter !== "all") params.set("type", typeFilter)
+    if (emisorFilter !== "all") params.set("emisor", emisorFilter)
+    if (userFilter !== "all") params.set("user", userFilter)
+    if (fechaDocumentoDesde) params.set("fechaDocDesde", fechaDocumentoDesde)
+    if (fechaDocumentoHasta) params.set("fechaDocHasta", fechaDocumentoHasta)
+    if (fechaSubidaDesde) params.set("fechaSubDesde", fechaSubidaDesde)
+    if (fechaSubidaHasta) params.set("fechaSubHasta", fechaSubidaHasta)
+    if (sortColumn) params.set("sortCol", sortColumn)
+    if (sortDirection) params.set("sortDir", sortDirection)
+    if (currentPage !== 1) params.set("page", currentPage.toString())
+    if (pageSize !== 10) params.set("pageSize", pageSize.toString())
+    if (showAdvancedFilters) params.set("advancedFilters", "true")
+
+    const queryString = params.toString()
+    const newUrl = queryString ? `${pathname}?${queryString}` : pathname
+
+    router.replace(newUrl, { scroll: false })
+  }, [
+    isInitialLoad,
+    searchTerm,
+    statusFilter,
+    typeFilter,
+    emisorFilter,
+    userFilter,
+    fechaDocumentoDesde,
+    fechaDocumentoHasta,
+    fechaSubidaDesde,
+    fechaSubidaHasta,
+    sortColumn,
+    sortDirection,
+    currentPage,
+    pageSize,
+    showAdvancedFilters,
+    pathname,
+    router,
+  ])
 
   // Redirect to login only after initialization is complete
   useEffect(() => {
@@ -614,14 +690,7 @@ export function DocumentDashboard() {
   }
 
   if (isLoadingOrganizations && selectedOrganizationId === null) {
-    return (
-      <div className="container mx-auto p-6 flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Cargando organizaciones...</p>
-        </div>
-      </div>
-    )
+    return <DashboardSkeleton />
   }
 
   if (!isLoadingOrganizations && selectedOrganizationId === null) {
@@ -1000,14 +1069,15 @@ export function DocumentDashboard() {
               </TableHeader>
               <TableBody>
                 {isLoadingDocuments ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="h-32 text-center">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        <span>Cargando documentos...</span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  <>
+                    {[...Array(3)].map((_, i) => (
+                      <TableRow key={`skeleton-${i}`}>
+                        <TableCell colSpan={9}>
+                          <Skeleton className="h-12 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </>
                 ) : paginatedDocuments.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">

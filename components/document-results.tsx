@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import type React from "react"
-import { useState, useEffect, useId, type CSSProperties } from "react"
+import { useState, useEffect, useId, useCallback, type CSSProperties } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -59,6 +59,7 @@ interface ExtractedData {
       rows: Array<Record<string, string | number>>
     }
     entries: Array<any>
+    journalEntryId?: number
   }
 }
 
@@ -68,6 +69,8 @@ type ViewMode = "documento" | "datos" | "resultado"
 
 const mapDocumentToExtractedData = (doc: Document): ExtractedData => {
   const journalEntry = doc.journal_entries?.[0]
+  console.log("[DocumentResults] Mapping Document:", doc)
+  console.log("[DocumentResults] Journal Entry:", journalEntry)
   let headers: string[] = []
   let rows: Array<Record<string, string | number>> = []
 
@@ -107,6 +110,7 @@ const mapDocumentToExtractedData = (doc: Document): ExtractedData => {
         rows: rows,
       },
       entries: [],
+      journalEntryId: journalEntry?.id
     }
   }
 }
@@ -232,43 +236,47 @@ export function DocumentResults({
   // --- Effects ---
 
   // Fetch Data
-  useEffect(() => {
-    const fetchDocument = async () => {
-      try {
-        setLoading(true)
-        let response = initialData
+  // Fetch Data
+  // Fetch Data
+  const fetchDocument = useCallback(async (forceRefresh = false) => {
+    try {
+      setLoading(true)
+      let response = forceRefresh ? undefined : initialData
+      console.log("[DocumentResults] Fetching document...", documentId, "Force refresh:", forceRefresh)
 
-        if (!response) {
-          response = await documentsService.getDocumentById(Number.parseInt(documentId))
-        }
-
-        if (response.document_group) {
-          setDocumentGroup(response.document_group)
-          const mainDoc = { ...response.document_group.main_document, relationship_type: "main" }
-          const relatedDocs = response.document_group.related_documents || []
-          setAllRelatedDocuments([mainDoc, ...relatedDocs])
-          setActiveTab("consolidated")
-        } else {
-          setAllRelatedDocuments([response.document])
-          setActiveTab("main")
-        }
-
-        setDocumentStatus(response.document.status || "Para confirmar")
-
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Error al cargar el documento")
-        toast({
-          title: "Error",
-          description: "No se pudo cargar el documento.",
-          variant: "destructive",
-        })
-      } finally {
-        setLoading(false)
+      if (!response) {
+        response = await documentsService.getDocumentById(Number.parseInt(documentId))
       }
-    }
 
+      if (response.document_group) {
+        setDocumentGroup(response.document_group)
+        const mainDoc = { ...response.document_group.main_document, relationship_type: "main" }
+        const relatedDocs = response.document_group.related_documents || []
+        setAllRelatedDocuments([mainDoc, ...relatedDocs])
+        setActiveTab("consolidated")
+      } else {
+        setAllRelatedDocuments([response.document])
+        setActiveTab("main")
+      }
+
+      setDocumentStatus(response.document.status || "Para confirmar")
+      console.log("[DocumentResults] Response:", response)
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cargar el documento")
+      toast({
+        title: "Error",
+        description: "No se pudo cargar el documento.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [documentId, initialData, toast])
+
+  useEffect(() => {
     fetchDocument()
-  }, [documentId, initialData])
+  }, [fetchDocument])
 
   // Update UI Data when Tab or Documents change
   useEffect(() => {
@@ -463,18 +471,76 @@ export function DocumentResults({
     setIsEditingResultadoTable(true)
   }
 
-  const handleSaveResultadoTable = () => {
-    if (useForRetraining) {
-      console.log("[v0] Guardando cambios y reentrando asistente...")
-      console.log("[v0] Instrucciones:", assistantInstructions)
-      console.log("[v0] Cambios en tabla:", resultadoTableData)
-    } else {
-      console.log("[v0] Guardando cambios en tabla de resultado...")
+  const handleSaveResultadoTable = async () => {
+    try {
+      console.log("[DocumentResults] Guardando cambios en tabla de resultado...")
+
+
+      const journalEntryId = currentExtractedData?.accountingEntry?.journalEntryId
+      if (!journalEntryId) {
+        throw new Error("No se encontró ID del asiento contable")
+      }
+
+      // Reconstruct lines from table data
+      const lines: Array<Record<string, any>> = []
+      const headers = currentExtractedData?.accountingEntry?.outputTable?.headers || []
+
+      // Find ID column index if it exists, otherwise use row index + 1
+      const idColIdx = headers.indexOf("ID")
+
+      resultadoTableData.forEach((row, rowIndex) => {
+        const lineIndex = idColIdx !== -1 ? Number(row[idColIdx]) : rowIndex + 1
+        const lineData: Record<string, any> = { line_index: lineIndex }
+
+        headers.forEach((header, colIndex) => {
+          // Skip ID field in the object properties if it's just metadata, 
+          // but include it if it's a field. The example payload didn't show ID as a field, 
+          // but showed 'line_index'. We already set line_index.
+          // Let's include all other fields.
+          if (header !== "ID") {
+            lineData[header] = row[colIndex]
+          }
+        })
+        lines.push(lineData)
+      })
+
+      const payload = {
+        lines: lines,
+        train: useForRetraining,
+        human_input: assistantInstructions
+      }
+
+      console.log("[DocumentResults] Payload:", payload)
+
+      await documentsService.updateJournalEntry(journalEntryId, payload)
+
+      toast({
+        title: "Guardado exitoso",
+        description: "Los cambios han sido guardados correctamente.",
+        variant: "default",
+      })
+
+      // Refresh data to ensure consistency
+      fetchDocument(true)
+
+      if (useForRetraining) {
+        console.log("[v0] Instrucciones para reentrenamiento:", assistantInstructions)
+        // Add logic for retraining if needed
+      }
+
+    } catch (error) {
+      console.error("[DocumentResults] Error al guardar:", error)
+      toast({
+        title: "Error al guardar",
+        description: error instanceof Error ? error.message : "Ocurrió un error al guardar los cambios.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsEditingResultadoTable(false)
+      setOriginalResultadoData([])
+      setAssistantInstructions("")
+      setUseForRetraining(false)
     }
-    setIsEditingResultadoTable(false)
-    setOriginalResultadoData([])
-    setAssistantInstructions("")
-    setUseForRetraining(false)
   }
 
   const handleCancelResultadoTable = () => {
@@ -1057,9 +1123,8 @@ export function DocumentResults({
                     {resultadoTableData.map((row, rowIdx) => (
                       <tr key={rowIdx} className="border-t">
                         {resultadoColumnOrder.map((header, colIdx) => {
-                          const originalColIdx = [
-                            "Línea", "Cód. Cuenta", "Nombre Cuenta", "Debe", "Haber", "Centro Costo", "Proyecto", "Cód. Fiscal", "Referencia"
-                          ].indexOf(header)
+                          const originalHeaders = currentExtractedData?.accountingEntry?.outputTable?.headers || []
+                          const originalColIdx = originalHeaders.indexOf(header)
                           const cell = row[originalColIdx] || ""
                           return (
                             <td key={colIdx} className="p-2 whitespace-nowrap">

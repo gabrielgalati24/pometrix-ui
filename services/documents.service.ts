@@ -172,4 +172,20 @@ export const documentsService = {
 
         return response.json()
     },
+
+    async updateJournalEntry(journalEntryId: number, data: any): Promise<any> {
+        const url = `${API_BASE_URL}/document/journals/?journal_id=${journalEntryId}`
+
+        const response = await fetch(url, {
+            method: "PUT",
+            headers: withAuthHeaders(),
+            body: JSON.stringify(data),
+        })
+
+        if (!response.ok) {
+            throw new Error("Error al actualizar el asiento contable")
+        }
+
+        return response.json()
+    },
 }

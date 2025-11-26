@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { FileText, FileStack, Layers, Eye, EyeOff, Database, ArrowLeft, ChevronRight, ChevronLeft, Maximize2, Minimize2, RefreshCw, Loader2, Pencil, GripVertical, Brain, CheckCircle2, FileOutput, Download, Trash2, CheckCircle, XCircle, Send, AlertCircle, Clock } from 'lucide-react'
+import { FileText, FileStack, Layers, Eye, EyeOff, Database, ArrowLeft, ChevronRight, ChevronLeft, Maximize2, Minimize2, RefreshCw, Loader2, Pencil, GripVertical, Brain, CheckCircle2, FileOutput, Download, Trash2, CheckCircle, XCircle, Send, AlertCircle, Clock, FileSpreadsheet } from 'lucide-react'
 import Link from "next/link"
 import { useRouter } from 'next/navigation'
 import {
@@ -60,6 +60,7 @@ interface ExtractedData {
     }
     entries: Array<any>
     journalEntryId?: number
+    humanInput?: string
   }
 }
 
@@ -110,7 +111,8 @@ const mapDocumentToExtractedData = (doc: Document): ExtractedData => {
         rows: rows,
       },
       entries: [],
-      journalEntryId: journalEntry?.id
+      journalEntryId: journalEntry?.id,
+      humanInput: typeof journalEntry?.human_input === 'string' ? journalEntry.human_input : ""
     }
   }
 }
@@ -301,6 +303,13 @@ export function DocumentResults({
     const extracted = mapDocumentToExtractedData(targetDoc)
     setCurrentExtractedData(extracted)
 
+    // Initialize assistant instructions from human input
+    if (extracted.accountingEntry?.humanInput) {
+      setAssistantInstructions(extracted.accountingEntry.humanInput)
+    } else {
+      setAssistantInstructions("")
+    }
+
     // Map ExtractedData to UI Tables
     // 1. Datos Table (Items)
     const itemsRows = extracted.items.map(item => [
@@ -467,7 +476,7 @@ export function DocumentResults({
 
   const handleEditResultadoTable = () => {
     setOriginalResultadoData(JSON.parse(JSON.stringify(resultadoTableData)))
-    setAssistantInstructions("")
+    // Don't clear assistantInstructions here, keep the current value
     setIsEditingResultadoTable(true)
   }
 
@@ -538,7 +547,8 @@ export function DocumentResults({
     } finally {
       setIsEditingResultadoTable(false)
       setOriginalResultadoData([])
-      setAssistantInstructions("")
+      // Do NOT clear assistantInstructions, so it remains visible
+      // setAssistantInstructions("") 
       setUseForRetraining(false)
     }
   }
@@ -547,7 +557,12 @@ export function DocumentResults({
     setResultadoTableData(originalResultadoData)
     setIsEditingResultadoTable(false)
     setOriginalResultadoData([])
-    setAssistantInstructions("")
+    // Reset assistant instructions to original value from data
+    if (currentExtractedData?.accountingEntry?.humanInput) {
+      setAssistantInstructions(currentExtractedData.accountingEntry.humanInput)
+    } else {
+      setAssistantInstructions("")
+    }
     setUseForRetraining(false)
   }
 
@@ -625,6 +640,7 @@ export function DocumentResults({
     const url = getPdfUrl(context, docIndex)
     const isPdf = url?.toLowerCase().endsWith('.pdf')
     const isImage = url?.match(/\.(jpeg|jpg|gif|png)$/i)
+    const isXlsx = url?.match(/\.(xlsx|xls)$/i)
 
     return (
       <Card className="h-full flex flex-col">
@@ -673,6 +689,19 @@ export function DocumentResults({
               ) : isImage ? (
                 <div className="w-full h-full flex items-center justify-center overflow-auto">
                   <img src={url} alt="Document" className="max-w-full max-h-full object-contain" />
+                </div>
+              ) : isXlsx ? (
+                <div className="w-full h-full flex flex-col">
+                  <iframe
+                    src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`}
+                    className="w-full h-full flex-1"
+                    title="Excel Viewer"
+                    onError={(e) => console.error("Error loading Excel viewer", e)}
+                  />
+                  <div className="p-2 bg-muted text-xs text-center border-t flex justify-between items-center">
+                    <span>Vista previa de Excel</span>
+                    <Button asChild variant="outline" size="sm" className="h-6"><a href={url} download>Descargar</a></Button>
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-4">
@@ -1072,10 +1101,11 @@ export function DocumentResults({
               </div>
             </div>
 
+            {/* Only show assistant instructions when editing */}
             {isEditingResultadoTable && (
               <div className="space-y-2">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-muted-foreground">Instrucciones para el asistente</label>
+                  <label className="text-sm font-medium text-muted-foreground">Instrucciones para el asistente (Human Input)</label>
                   <textarea
                     value={assistantInstructions}
                     onChange={(e) => setAssistantInstructions(e.target.value)}

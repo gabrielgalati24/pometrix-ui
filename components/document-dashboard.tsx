@@ -1,9 +1,15 @@
 "use client"
 
-import { DashboardSkeleton } from "@/components/dashboard-skeleton"
-
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Upload,
   FileText,
@@ -12,7 +18,6 @@ import {
   Download,
   AlertCircle,
   CheckCircle,
-  Clock,
   Link2,
   ArrowUpDown,
   ArrowUp,
@@ -25,9 +30,9 @@ import {
   Info,
   Send,
   XCircle,
+  Clock,
   Loader2,
 } from "lucide-react"
-import Link from "next/link"
 import { useAuthStore } from "@/store/authStore"
 import {
   DropdownMenu,
@@ -36,264 +41,344 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Skeleton } from "@/components/ui/skeleton"
-import { useToast } from "@/hooks/use-toast"
-import { documentsService, type Document, type DocumentsResponse } from "@/services/documents.service"
-import { useOrganizationStore } from "@/store/organizationStore"
+import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DocumentLogsModal } from "@/components/document-logs-modal"
+import { documentsService, type Document, type Organization } from "@/services/documents.service"
 
-type Pagination = DocumentsResponse["documents"]["pagination"]
+type DocumentStatus =
+  | "Para revisar"
+  | "Procesado"
+  | "Error"
+  | "Confirmado"
+  | "Exportado"
+  | "Finalizado"
+  | "Rechazado"
 
-interface DocumentRow {
+type DocumentType = "Factura" | "Remito" | string
+
+type DocumentRow = {
   id: string
   filename: string
-  type: string
-  documentDate: string
-  uploadDate: string
-  documentDateRaw: string | null
-  uploadDateRaw: string | null
-  status: string
   supplier: string
-  uploadedBy: string
-  relatedDocumentsCount: number
+  type: DocumentType
+  documentDate: string // dd/mm/yyyy
+  uploadDate: string // dd/mm/yyyy
+  status: DocumentStatus
+  relatedDocuments?: string[]
+  usedForTraining?: boolean
+  uploadedBy?: string
+  logs?: any[]
 }
 
-const STATUS_MAP: Record<string, string> = {
-  READY: "Confirmado",
-  EXPORT: "Enviado",
-  POSTING: "Para confirmar",
-  REVIEW: "Para revisar",
-  FAILURE: "Rechazado",
-  SENT: "Enviado",
-  CONFIRMED: "Confirmado",
+function toDDMMYYYY(value: any): string {
+  if (!value) return ""
+  if (typeof value === "string") {
+    // already dd/mm/yyyy
+    if (/^\d{2}\/\d{2}\/\d{2,4}$/.test(value)) {
+      const [d, m, y] = value.split("/")
+      const yyyy = y.length === 2 ? `20${y}` : y
+      return `${d.padStart(2, "0")}/${m.padStart(2, "0")}/${yyyy}`
+    }
+    // iso date
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      const [yyyy, mm, dd] = value.slice(0, 10).split("-")
+      return `${dd}/${mm}/${yyyy}`
+    }
+  }
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  const dd = String(d.getDate()).padStart(2, "0")
+  const mm = String(d.getMonth() + 1).padStart(2, "0")
+  const yyyy = String(d.getFullYear())
+  return `${dd}/${mm}/${yyyy}`
 }
 
-const parseToDate = (value?: string | null): Date | null => {
-  if (!value) return null
+function normalizeDoc(raw: Document): DocumentRow {
+  const id = String(raw.id)
 
-  const directDate = new Date(value)
-  if (!Number.isNaN(directDate.getTime())) {
-    return directDate
+  // Map backend status to frontend status
+  const mapStatus = (status: string): DocumentStatus => {
+    const statusMap: Record<string, DocumentStatus> = {
+      "review": "Para revisar",
+      "processed": "Procesado",
+      "error": "Error",
+      "confirmed": "Confirmado",
+      "exported": "Exportado",
+      "finished": "Finalizado",
+      "rejected": "Rechazado",
+    }
+    return statusMap[status.toLowerCase()] || "Procesado"
   }
 
-  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(value)) {
-    const [day, month, year] = value.split("/")
-    const fullYear = year.length === 2 ? `20${year}` : year
-    const parsed = new Date(Number(fullYear), Number(month) - 1, Number(day))
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed
+  // Extract supplier from data or extra_data
+  let supplier = "—"
+  if (raw.data && typeof raw.data === "object") {
+    supplier = (raw.data as any)?.supplier || (raw.data as any)?.emisor || (raw.data as any)?.proveedor || supplier
+  }
+  if (supplier === "—" && raw.extra_data && typeof raw.extra_data === "object") {
+    supplier = (raw.extra_data as any)?.supplier || (raw.extra_data as any)?.emisor || supplier
+  }
+
+  return {
+    id,
+    filename: raw.document_name,
+    supplier,
+    type: raw.document_type,
+    documentDate: toDDMMYYYY(raw.date_document),
+    uploadDate: toDDMMYYYY(raw.journal_entries?.[0]?.date_create || ""),
+    status: mapStatus(raw.human_status || raw.status),
+    relatedDocuments: [],
+    usedForTraining: raw.is_trained,
+    uploadedBy: raw.uploaded_by_username || "currentUser",
+    logs: [],
+  }
+}
+
+
+
+const getStatusBadge = (status: string, onStatusChange: (newStatus: string) => void) => {
+  const statusOptions = [
+    { value: "Para revisar", label: "Para revisar", icon: AlertCircle },
+    { value: "Procesado", label: "Procesado", icon: CheckCircle },
+    { value: "Error", label: "Error", icon: XCircle },
+    { value: "Confirmado", label: "Confirmado", icon: CheckCircle },
+    { value: "Exportado", label: "Exportado", icon: Send },
+    { value: "Finalizado", label: "Finalizado", icon: CheckCircle },
+    { value: "Rechazado", label: "Rechazado", icon: XCircle },
+  ]
+
+  const getBadgeContent = (st: string) => {
+    switch (st) {
+      case "Para revisar":
+        return (
+          <Badge
+            variant="secondary"
+            className="bg-yellow-600 text-white flex items-center gap-1.5 cursor-pointer hover:bg-yellow-700"
+          >
+            <AlertCircle className="h-3.5 w-3.5" />
+            Para revisar
+          </Badge>
+        )
+      case "Procesado":
+        return (
+          <Badge
+            variant="secondary"
+            className="bg-blue-500 text-white flex items-center gap-1.5 cursor-pointer hover:bg-blue-600"
+          >
+            <CheckCircle className="h-3.5 w-3.5" />
+            Procesado
+          </Badge>
+        )
+      case "Error":
+        return (
+          <Badge variant="destructive" className="flex items-center gap-1.5 cursor-pointer hover:bg-destructive/80">
+            <XCircle className="h-3.5 w-3.5" />
+            Error
+          </Badge>
+        )
+      case "Confirmado":
+        return (
+          <Badge
+            variant="default"
+            className="bg-green-600 text-white flex items-center gap-1.5 cursor-pointer hover:bg-green-700"
+          >
+            <CheckCircle className="h-3.5 w-3.5" />
+            Confirmado
+          </Badge>
+        )
+      case "Exportado":
+        return (
+          <Badge
+            variant="default"
+            className="bg-green-600 text-white flex items-center gap-1.5 cursor-pointer hover:bg-green-700"
+          >
+            <Send className="h-3.5 w-3.5" />
+            Exportado
+          </Badge>
+        )
+      case "Finalizado":
+        return (
+          <Badge
+            variant="default"
+            className="bg-emerald-700 text-white flex items-center gap-1.5 cursor-pointer hover:bg-emerald-800"
+          >
+            <CheckCircle className="h-3.5 w-3.5" />
+            Finalizado
+          </Badge>
+        )
+      case "Rechazado":
+        return (
+          <Badge variant="destructive" className="flex items-center gap-1.5 cursor-pointer hover:bg-destructive/80">
+            <XCircle className="h-3.5 w-3.5" />
+            Rechazado
+          </Badge>
+        )
+      default:
+        return (
+          <Badge variant="outline" className="cursor-pointer">
+            {st}
+          </Badge>
+        )
     }
   }
 
-  return null
-}
-
-const formatDate = (value?: string | null): string => {
-  const date = parseToDate(value)
-  if (!date) {
-    return value ?? "—"
-  }
-
-  return new Intl.DateTimeFormat("es-AR").format(date)
-}
-
-const normalizeStatus = (status?: string | null): string => {
-  if (!status) return "Desconocido"
-  const normalized = status.toUpperCase()
-  return STATUS_MAP[normalized] ?? status
-}
-
-const extractSupplier = (doc: Document): string => {
-  const data = doc.data ?? {}
   return (
-    (data as Record<string, unknown>).proveedor_nombre ||
-    (data as Record<string, unknown>).proveedor ||
-    (data as Record<string, unknown>).merchantname ||
-    doc.organization_name ||
-    "Desconocido"
-  ) as string
-}
-
-const mapDocumentToRow = (doc: Document): DocumentRow => {
-  const documentDateRaw = doc.date_document ?? null
-  const uploadDateRaw = doc.journal_entries?.[0]?.date_create ?? doc.date_document ?? null
-
-  return {
-    id: doc.id.toString(),
-    filename: doc.document_name ?? `Documento ${doc.id}`,
-    type: doc.document_type ?? "Desconocido",
-    documentDate: formatDate(documentDateRaw),
-    uploadDate: formatDate(uploadDateRaw),
-    documentDateRaw,
-    uploadDateRaw,
-    status: normalizeStatus(doc.human_status ?? doc.status),
-    supplier: extractSupplier(doc),
-    uploadedBy: doc.uploaded_by_username ?? "Sin usuario",
-    relatedDocumentsCount: doc.journal_entries?.length ?? 0,
-  }
-}
-
-const getStatusIcon = (status: string) => {
-  switch (status) {
-    case "Para revisar":
-      return <AlertCircle className="h-4 w-4 text-warning" />
-    case "Para confirmar":
-      return <Clock className="h-4 w-4 text-info" />
-    case "Confirmado":
-      return <CheckCircle className="h-4 w-4 text-success" />
-    case "Enviado":
-      return <Send className="h-4 w-4 text-success" />
-    case "Rechazado":
-      return <XCircle className="h-4 w-4 text-destructive" />
-    default:
-      return null
-  }
-}
-
-const getStatusBadge = (status: string) => {
-  switch (status) {
-    case "Para revisar":
-      return (
-        <Badge variant="secondary" className="bg-yellow-600 text-white flex items-center gap-1.5">
-          <AlertCircle className="h-3.5 w-3.5" />
-          Para revisar
-        </Badge>
-      )
-    case "Para confirmar":
-      return (
-        <Badge variant="secondary" className="bg-yellow-600 text-white flex items-center gap-1.5">
-          <Clock className="h-3.5 w-3.5" />
-          Para confirmar
-        </Badge>
-      )
-    case "Confirmado":
-      return (
-        <Badge variant="default" className="bg-success text-success-foreground flex items-center gap-1.5">
-          <CheckCircle className="h-3.5 w-3.5" />
-          Confirmado
-        </Badge>
-      )
-    case "Enviado":
-      return (
-        <Badge variant="default" className="bg-success text-success-foreground flex items-center gap-1.5">
-          <Send className="h-3.5 w-3.5" />
-          Enviado
-        </Badge>
-      )
-    case "Rechazado":
-      return (
-        <Badge variant="destructive" className="flex items-center gap-1.5">
-          <XCircle className="h-3.5 w-3.5" />
-          Rechazado
-        </Badge>
-      )
-    default:
-      return <Badge variant="outline">{status}</Badge>
-  }
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+        {getBadgeContent(status)}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {statusOptions.map((option) => {
+          const Icon = option.icon
+          return (
+            <DropdownMenuItem
+              key={option.value}
+              onClick={(e) => {
+                e.stopPropagation()
+                onStatusChange(option.value)
+              }}
+              className={status === option.value ? "bg-muted" : ""}
+            >
+              <Icon className="h-4 w-4 mr-2" />
+              {option.label}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 export function DocumentDashboard() {
   const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const { initialize, isAuthenticated, isLoading, isInitialized } = useAuthStore()
-  const fetchOrganizations = useOrganizationStore((state) => state.fetchOrganizations)
-  const selectedOrganizationId = useOrganizationStore((state) => state.selectedOrganizationId)
-  const setSelectedOrganization = useOrganizationStore((state) => state.setSelectedOrganization)
-  const isLoadingOrganizations = useOrganizationStore((state) => state.isLoadingOrganizations)
-  const organizationsError = useOrganizationStore((state) => state.error)
-  const { toast } = useToast()
+  const { verifyToken, isAuthenticated, isLoading } = useAuthStore()
 
-  // Initialize state from URL parameters
-  const [isInitialLoad, setIsInitialLoad] = useState(true)
-  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "")
-  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "all")
-  const [typeFilter, setTypeFilter] = useState(searchParams.get("type") || "all")
-  const [emisorFilter, setEmisorFilter] = useState(searchParams.get("emisor") || "all")
-  const [userFilter, setUserFilter] = useState(searchParams.get("user") || "all")
-  const [fechaDocumentoDesde, setFechaDocumentoDesde] = useState(searchParams.get("fechaDocDesde") || "")
-  const [fechaDocumentoHasta, setFechaDocumentoHasta] = useState(searchParams.get("fechaDocHasta") || "")
-  const [fechaSubidaDesde, setFechaSubidaDesde] = useState(searchParams.get("fechaSubDesde") || "")
-  const [fechaSubidaHasta, setFechaSubidaHasta] = useState(searchParams.get("fechaSubHasta") || "")
-  const [sortColumn, setSortColumn] = useState<string | null>(searchParams.get("sortCol"))
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">((searchParams.get("sortDir") as "asc" | "desc") || "asc")
+  const [organizations, setOrganizations] = useState<Organization[]>([])
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<string>("")
+  const [organizationsLoading, setOrganizationsLoading] = useState(false)
+
+  const [searchTerm, setSearchTerm] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [typeFilter, setTypeFilter] = useState("all")
+  const [emisorFilter, setEmisorFilter] = useState("all")
+  const [userFilter, setUserFilter] = useState("all")
+  const [trainingFilter, setTrainingFilter] = useState("all")
+  const [fechaDocumentoDesde, setFechaDocumentoDesde] = useState("")
+  const [fechaDocumentoHasta, setFechaDocumentoHasta] = useState("")
+  const [fechaSubidaDesde, setFechaSubidaDesde] = useState("")
+  const [fechaSubidaHasta, setFechaSubidaHasta] = useState("")
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc")
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set())
-  const [currentPage, setCurrentPage] = useState(Number(searchParams.get("page")) || 1)
-  const [pageSize, setPageSize] = useState(Number(searchParams.get("pageSize")) || 10)
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(searchParams.get("advancedFilters") === "true")
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+
   const [documents, setDocuments] = useState<DocumentRow[]>([])
-  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false)
-  const [pagination, setPagination] = useState<Pagination | null>(null)
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchParams.get("search") || "")
+  const [documentsLoading, setDocumentsLoading] = useState(false)
+  const [documentsError, setDocumentsError] = useState<string | null>(null)
 
-  // Initialize auth on mount
-  useEffect(() => {
-    initialize()
-  }, [initialize])
+  const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [documentsToDelete, setDocumentsToDelete] = useState<Set<string>>(new Set())
+  const [markAsFinished, setMarkAsFinished] = useState(true)
 
-  // Sync URL parameters to state (for browser back/forward)
+  const [showLogsModal, setShowLogsModal] = useState(false)
+  const [selectedDocumentForLogs, setSelectedDocumentForLogs] = useState<{
+    id: string
+    filename: string
+    logs: any[]
+  } | null>(null)
+
+  const [bulkBusy, setBulkBusy] = useState<null | "confirm" | "reject" | "export" | "finalize" | "reprocessR" | "reprocessA" | "download" | "delete">(
+    null,
+  )
+  const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({})
+
+  const fetchAbort = useRef<AbortController | null>(null)
+
   useEffect(() => {
-    if (isInitialLoad) {
-      setIsInitialLoad(false)
-      return
+    if (!isAuthenticated && !isLoading) verifyToken()
+  }, [verifyToken, isAuthenticated, isLoading])
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) router.push("/login")
+  }, [isLoading, isAuthenticated, router])
+
+  const loadOrganizations = async () => {
+    setOrganizationsLoading(true)
+    try {
+      const response = await documentsService.getOrganizations()
+      setOrganizations(response.organizations)
+      if (response.organizations.length > 0 && !selectedOrganizationId) {
+        setSelectedOrganizationId(String(response.organizations[0].id))
+      }
+    } catch (error) {
+      console.error("Error loading organizations:", error)
+      setDocumentsError("No se pudieron cargar las organizaciones")
+    } finally {
+      setOrganizationsLoading(false)
     }
+  }
 
-    setSearchTerm(searchParams.get("search") || "")
-    setStatusFilter(searchParams.get("status") || "all")
-    setTypeFilter(searchParams.get("type") || "all")
-    setEmisorFilter(searchParams.get("emisor") || "all")
-    setUserFilter(searchParams.get("user") || "all")
-    setFechaDocumentoDesde(searchParams.get("fechaDocDesde") || "")
-    setFechaDocumentoHasta(searchParams.get("fechaDocHasta") || "")
-    setFechaSubidaDesde(searchParams.get("fechaSubDesde") || "")
-    setFechaSubidaHasta(searchParams.get("fechaSubHasta") || "")
-    setSortColumn(searchParams.get("sortCol"))
-    setSortDirection((searchParams.get("sortDir") as "asc" | "desc") || "asc")
-    setCurrentPage(Number(searchParams.get("page")) || 1)
-    setPageSize(Number(searchParams.get("pageSize")) || 10)
-    setShowAdvancedFilters(searchParams.get("advancedFilters") === "true")
-
-    const orgIdParam = searchParams.get("organizationId")
-    if (orgIdParam) {
-      setSelectedOrganization(Number(orgIdParam))
-    }
-  }, [searchParams, setSelectedOrganization])
-
-  // Sync state to URL parameters
   useEffect(() => {
-    if (isInitialLoad) return
+    if (isAuthenticated && !isLoading) {
+      loadOrganizations()
+    }
+  }, [isAuthenticated, isLoading])
 
-    const params = new URLSearchParams()
+  const loadDocuments = async () => {
+    if (!selectedOrganizationId) return
 
-    if (searchTerm) params.set("search", searchTerm)
-    if (statusFilter !== "all") params.set("status", statusFilter)
-    if (typeFilter !== "all") params.set("type", typeFilter)
-    if (emisorFilter !== "all") params.set("emisor", emisorFilter)
-    if (userFilter !== "all") params.set("user", userFilter)
-    if (fechaDocumentoDesde) params.set("fechaDocDesde", fechaDocumentoDesde)
-    if (fechaDocumentoHasta) params.set("fechaDocHasta", fechaDocumentoHasta)
-    if (fechaSubidaDesde) params.set("fechaSubDesde", fechaSubidaDesde)
-    if (fechaSubidaHasta) params.set("fechaSubHasta", fechaSubidaHasta)
-    if (sortColumn) params.set("sortCol", sortColumn)
-    if (sortDirection) params.set("sortDir", sortDirection)
-    if (currentPage !== 1) params.set("page", currentPage.toString())
-    if (pageSize !== 10) params.set("pageSize", pageSize.toString())
-    if (showAdvancedFilters) params.set("advancedFilters", "true")
-    if (selectedOrganizationId) params.set("organizationId", selectedOrganizationId.toString())
+    setDocumentsError(null)
+    setDocumentsLoading(true)
+    try {
+      fetchAbort.current?.abort()
+      fetchAbort.current = new AbortController()
 
-    const queryString = params.toString()
-    const newUrl = queryString ? `${pathname}?${queryString}` : pathname
+      const response = await documentsService.getDocuments(
+        Number(selectedOrganizationId),
+        currentPage,
+        pageSize,
+        {
+          search: searchTerm,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          type: typeFilter !== "all" ? typeFilter : undefined,
+          uploaded_by: userFilter !== "all" && userFilter !== "myDocuments" ? userFilter : undefined,
+          is_trained: trainingFilter !== "all" ? (trainingFilter === "training" ? "true" : "false") : undefined,
+          date_start: fechaDocumentoDesde || undefined,
+          date_end: fechaDocumentoHasta || undefined,
+        }
+      )
 
-    router.replace(newUrl, { scroll: false })
+      const rows: DocumentRow[] = response.documents.documents.map(normalizeDoc)
+      setDocuments(rows)
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setDocumentsError(e?.message ?? "No se pudieron cargar los documentos")
+    } finally {
+      setDocumentsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (isAuthenticated && !isLoading && selectedOrganizationId) {
+      loadDocuments()
+    }
+    return () => fetchAbort.current?.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading, selectedOrganizationId, currentPage, pageSize, searchTerm, statusFilter, typeFilter, userFilter, trainingFilter, fechaDocumentoDesde, fechaDocumentoHasta])
+
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) loadDocuments()
+    return () => fetchAbort.current?.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, isLoading])
+
+  useEffect(() => {
+    setCurrentPage(1)
   }, [
-    isInitialLoad,
     searchTerm,
     statusFilter,
     typeFilter,
@@ -305,165 +390,125 @@ export function DocumentDashboard() {
     fechaSubidaHasta,
     sortColumn,
     sortDirection,
-    currentPage,
-    pageSize,
-    showAdvancedFilters,
-    selectedOrganizationId,
-    pathname,
-    router,
-  ])
-
-  // Redirect to login only after initialization is complete
-  useEffect(() => {
-    if (isInitialized && !isAuthenticated && !isLoading) {
-      router.push("/login")
-    }
-  }, [isInitialized, isAuthenticated, isLoading, router])
-
-  useEffect(() => {
-    if (!isAuthenticated) return
-    fetchOrganizations()
-  }, [isAuthenticated, fetchOrganizations])
-
-  useEffect(() => {
-    if (!organizationsError) return
-    toast({
-      title: "Error",
-      description: organizationsError,
-      variant: "destructive",
-    })
-  }, [organizationsError, toast])
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [searchTerm])
-
-  useEffect(() => {
-    if (currentPage !== 1) {
-      setCurrentPage(1)
-    }
-  }, [
-    debouncedSearchTerm,
-    statusFilter,
-    typeFilter,
-    emisorFilter,
-    userFilter,
-    fechaDocumentoDesde,
-    fechaDocumentoHasta,
-    fechaSubidaDesde,
-    fechaSubidaHasta,
-    selectedOrganizationId,
-    sortColumn,
-    sortDirection,
   ])
 
   useEffect(() => {
     setSelectedDocuments(new Set())
-  }, [currentPage, pageSize, documents, sortColumn, sortDirection])
+  }, [currentPage, pageSize])
 
-  const loadDocuments = useCallback(
-    async (orgId: number, page: number, size: number) => {
-      setIsLoadingDocuments(true)
-      try {
-        const UI_STATUS_TO_API: Record<string, string> = {
-          "Para revisar": "REVIEW",
-          "Para confirmar": "POSTING",
-          "Confirmado": "CONFIRMED",
-          "Enviado": "EXPORT",
-          "Rechazado": "REJECTED",
-        }
-
-        const filters = {
-          search: debouncedSearchTerm || undefined,
-          status: statusFilter !== "all" ? (UI_STATUS_TO_API[statusFilter] || statusFilter) : undefined,
-          type: typeFilter !== "all" ? typeFilter : undefined,
-          uploaded_by: userFilter !== "all" && userFilter !== "myDocuments" ? userFilter : undefined, // Adjust based on actual backend requirement for "myDocuments"
-          date_start: fechaSubidaDesde || undefined,
-          date_end: fechaSubidaHasta || undefined,
-          sortCol: sortColumn || undefined,
-          sortDir: sortDirection,
-        }
-
-        // Handle "myDocuments" special case if needed, or assume userFilter holds the username
-        if (userFilter === "myDocuments") {
-          // If the backend expects a specific flag or username for "myDocuments", set it here.
-          // For now assuming "uploaded_by" takes a username.
-          // If "myDocuments" is a UI concept, we might need the current user's username.
-          // The auth store might have it.
-        }
-
-        const response = await documentsService.getDocuments(orgId, page, size, filters)
-        const rows = response.documents.documents.map(mapDocumentToRow)
-        setDocuments(rows)
-        setPagination(response.documents.pagination)
-      } catch (error) {
-        console.error("Error loading documents:", error)
-        toast({
-          title: "Error",
-          description: "No se pudieron cargar los documentos",
-          variant: "destructive",
-        })
-      } finally {
-        setIsLoadingDocuments(false)
-      }
-    },
-    [toast, debouncedSearchTerm, statusFilter, typeFilter, userFilter, fechaSubidaDesde, fechaSubidaHasta, sortColumn, sortDirection],
-  )
-
-  useEffect(() => {
-    if (!isAuthenticated || selectedOrganizationId === null) return
-    loadDocuments(selectedOrganizationId, currentPage, pageSize)
-  }, [isAuthenticated, selectedOrganizationId, currentPage, pageSize, loadDocuments])
-
-
-
-  const uniqueEmisores = useMemo(
-    () => Array.from(new Set(documents.map((doc) => doc.supplier))).sort(),
-    [documents],
-  )
-
-  const isDateInRange = (rawValue: string | null, desde: string, hasta: string) => {
-    if (!desde && !hasta) return true
-    const date = parseToDate(rawValue)
-    if (!date) {
-      return false
-    }
-
-    if (desde) {
-      const from = new Date(desde)
-      if (date < from) return false
-    }
-
-    if (hasta) {
-      const to = new Date(hasta)
-      to.setHours(23, 59, 59, 999)
-      if (date > to) return false
-    }
-
-    return true
+  if (isLoading && !isAuthenticated) {
+    return (
+      <div className="container mx-auto p-3 flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Verificando autenticación...</p>
+        </div>
+      </div>
+    )
   }
 
-  // Client-side filtering removed in favor of backend filtering
-  const filteredDocuments = documents
+  if (!isAuthenticated) return null
 
+  const uniqueEmisores = useMemo(() => Array.from(new Set(documents.map((d) => d.supplier))).sort(), [documents])
 
+  const parseDate = (dateStr: string) => {
+    const [day, month, year] = (dateStr || "").split("/")
+    if (!day || !month || !year) return new Date("invalid")
+    return new Date(Number(year), Number(month) - 1, Number(day))
+  }
+
+  const isDateInRange = (dateStr: string, desde: string, hasta: string) => {
+    if (!desde && !hasta) return true
+    const date = parseDate(dateStr)
+    if (Number.isNaN(date.getTime())) return false
+    if (desde && !hasta) return date >= new Date(desde)
+    if (!desde && hasta) return date <= new Date(hasta)
+    return date >= new Date(desde) && date <= new Date(hasta)
+  }
+
+  const filteredDocuments = useMemo(() => {
+    return documents.filter((doc) => {
+      const matchesSearch =
+        doc.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        doc.supplier.toLowerCase().includes(searchTerm.toLowerCase())
+
+      const matchesStatus = statusFilter === "all" || doc.status === statusFilter
+      const matchesType = typeFilter === "all" || doc.type === typeFilter
+      const matchesEmisor = emisorFilter === "all" || doc.supplier === emisorFilter
+
+      const matchesUser =
+        userFilter === "all" ||
+        (userFilter === "myDocuments" && doc.uploadedBy === "currentUser") ||
+        (userFilter !== "all" && userFilter !== "myDocuments" && doc.uploadedBy === userFilter)
+
+      const matchesTraining =
+        trainingFilter === "all" ||
+        (trainingFilter === "training" && doc.usedForTraining === true) ||
+        (trainingFilter === "notTraining" && doc.usedForTraining !== true)
+
+      const matchesFechaDocumento = isDateInRange(doc.documentDate, fechaDocumentoDesde, fechaDocumentoHasta)
+      const matchesFechaSubida = isDateInRange(doc.uploadDate, fechaSubidaDesde, fechaSubidaHasta)
+
+      return (
+        matchesSearch &&
+        matchesStatus &&
+        matchesType &&
+        matchesEmisor &&
+        matchesUser &&
+        matchesTraining &&
+        matchesFechaDocumento &&
+        matchesFechaSubida
+      )
+    })
+  }, [
+    documents,
+    emisorFilter,
+    fechaDocumentoDesde,
+    fechaDocumentoHasta,
+    fechaSubidaDesde,
+    fechaSubidaHasta,
+    searchTerm,
+    statusFilter,
+    trainingFilter,
+    typeFilter,
+    userFilter,
+  ])
+
+  const totalDocuments = documents.length
+  const paraRevisarDocuments = documents.filter((doc) => doc.status === "Para revisar").length
+  const procesadoDocuments = documents.filter((doc) => doc.status === "Procesado").length
+  const errorDocuments = documents.filter((doc) => doc.status === "Error").length
+  const confirmadosDocuments = documents.filter((doc) => doc.status === "Confirmado").length
+
+  const getDocumentsThisWeek = () => {
+    const now = new Date()
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    return documents.filter((doc) => {
+      const [day, month, year] = (doc.uploadDate || "").split("/")
+      const uploadDate = new Date(Number(year), Number(month) - 1, Number(day))
+      return !Number.isNaN(uploadDate.getTime()) && uploadDate >= oneWeekAgo
+    }).length
+  }
+
+  const documentsThisWeek = getDocumentsThisWeek()
+  const successPercentage = totalDocuments > 0 ? Math.round((confirmadosDocuments / totalDocuments) * 100) : 0
+
+  const handleMetricClick = (filterValue: string) => {
+    setStatusFilter(filterValue)
+    setCurrentPage(1)
+  }
 
   const handleSort = (column: string) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-    } else {
+    if (sortColumn === column) setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+    else {
       setSortColumn(column)
       setSortDirection("asc")
     }
   }
 
   const getSortIcon = (column: string) => {
-    if (sortColumn !== column) {
-      return <ArrowUpDown className="h-4 w-4 text-muted-foreground/40" />
-    }
+    if (sortColumn !== column) return <ArrowUpDown className="h-4 w-4 text-muted-foreground/40" />
     return sortDirection === "asc" ? (
       <ArrowUp className="h-4 w-4 text-muted-foreground" />
     ) : (
@@ -471,60 +516,67 @@ export function DocumentDashboard() {
     )
   }
 
-  // Client-side sorting removed in favor of backend sorting
-  const sortedDocuments = filteredDocuments
+  const sortedDocuments = useMemo(() => {
+    const base = [...filteredDocuments]
+    return base.sort((a, b) => {
+      if (!sortColumn) return 0
 
-  const displayedDocuments = sortedDocuments
+      let aValue: any
+      let bValue: any
 
-  const totalDocuments = pagination?.total_items ?? documents.length
-  const paraRevisarDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === "Para revisar").length,
-    [documents],
-  )
-  const paraConfirmarDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === "Para confirmar").length,
-    [documents],
-  )
-  const enviadosDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === "Enviado").length,
-    [documents],
-  )
+      switch (sortColumn) {
+        case "id":
+          aValue = a.id
+          bValue = b.id
+          break
+        case "tipo":
+          aValue = a.type
+          bValue = b.type
+          break
+        case "emisor":
+          aValue = a.supplier
+          bValue = b.supplier
+          break
+        case "fechaDocumento":
+          aValue = new Date(a.documentDate.split("/").reverse().join("-"))
+          bValue = new Date(b.documentDate.split("/").reverse().join("-"))
+          break
+        case "fechaSubida":
+          aValue = new Date(a.uploadDate.split("/").reverse().join("-"))
+          bValue = new Date(b.uploadDate.split("/").reverse().join("-"))
+          break
+        case "estado":
+          aValue = a.status
+          bValue = b.status
+          break
+        case "archivo":
+          aValue = a.filename
+          bValue = b.filename
+          break
+        default:
+          return 0
+      }
 
-  const documentsThisWeek = useMemo(() => {
-    const now = new Date()
-    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1
+      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1
+      return 0
+    })
+  }, [filteredDocuments, sortColumn, sortDirection])
 
-    return documents.filter((doc: DocumentRow) => {
-      const uploadDate = parseToDate(doc.uploadDateRaw)
-      return uploadDate ? uploadDate >= oneWeekAgo : false
-    }).length
-  }, [documents])
-
-  const successPercentage = totalDocuments > 0 ? Math.round((enviadosDocuments / totalDocuments) * 100) : 0
-
-  const handleMetricClick = (filterValue: string) => {
-    setStatusFilter(filterValue)
-    setCurrentPage(1)
-  }
-
-  const totalPages = pagination?.total_pages ?? 0
-  const paginatedDocuments = displayedDocuments
+  const totalPages = Math.ceil(sortedDocuments.length / pageSize)
+  const startIndex = (currentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedDocuments = sortedDocuments.slice(startIndex, endIndex)
 
   const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      setSelectedDocuments(new Set(paginatedDocuments.map((doc) => doc.id)))
-    } else {
-      setSelectedDocuments(new Set())
-    }
+    if (checked) setSelectedDocuments(new Set(paginatedDocuments.map((doc) => doc.id)))
+    else setSelectedDocuments(new Set())
   }
 
   const handleSelectDocument = (docId: string, checked: boolean) => {
     const newSelected = new Set(selectedDocuments)
-    if (checked) {
-      newSelected.add(docId)
-    } else {
-      newSelected.delete(docId)
-    }
+    if (checked) newSelected.add(docId)
+    else newSelected.delete(docId)
     setSelectedDocuments(newSelected)
   }
 
@@ -532,50 +584,7 @@ export function DocumentDashboard() {
     paginatedDocuments.length > 0 && paginatedDocuments.every((doc) => selectedDocuments.has(doc.id))
   const isSomeSelected = selectedDocuments.size > 0 && !isAllSelected
 
-  const handleReprocessReading = () => {
-    console.log("[v0] Reprocesar lectura:", Array.from(selectedDocuments))
-    // TODO: Implement reprocess reading logic
-  }
-
-  const handleReprocessOutput = () => {
-    console.log("[v0] Reprocesar Asistente:", Array.from(selectedDocuments))
-    // TODO: Implement reprocess output logic
-  }
-
-  const handleExport = () => {
-    console.log("[v0] Exportar:", Array.from(selectedDocuments))
-    // TODO: Implement export logic
-  }
-
-  const handleDelete = () => {
-    console.log("[v0] Eliminar:", Array.from(selectedDocuments))
-    // TODO: Implement delete logic with confirmation
-  }
-
-  const handleIndividualReprocessReading = (docId: string) => {
-    console.log("[v0] Reprocesar lectura individual:", docId)
-    // TODO: Implement individual reprocess reading logic
-  }
-
-  const handleIndividualReprocessOutput = (docId: string) => {
-    console.log("[v0] Reprocesar Asistente individual:", docId)
-    // TODO: Implement individual reprocess output logic
-  }
-
-  const handleIndividualExport = (docId: string) => {
-    console.log("[v0] Exportar individual:", docId)
-    // TODO: Implement individual export logic
-  }
-
-  const handleIndividualDelete = (docId: string) => {
-    console.log("[v0] Eliminar individual:", docId)
-    // TODO: Implement individual delete logic with confirmation
-  }
-
-  const handlePageChange = (page: number) => {
-    if (page < 1 || page > totalPages) return
-    setCurrentPage(page)
-  }
+  const handlePageChange = (page: number) => setCurrentPage(page)
 
   const handlePageSizeChange = (size: string) => {
     setPageSize(Number(size))
@@ -587,22 +596,16 @@ export function DocumentDashboard() {
     const maxVisiblePages = 5
 
     if (totalPages <= maxVisiblePages) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i)
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i)
     } else {
       if (currentPage <= 3) {
-        for (let i = 1; i <= 4; i++) {
-          pages.push(i)
-        }
+        for (let i = 1; i <= 4; i++) pages.push(i)
         pages.push("...")
         pages.push(totalPages)
       } else if (currentPage >= totalPages - 2) {
         pages.push(1)
         pages.push("...")
-        for (let i = totalPages - 3; i <= totalPages; i++) {
-          pages.push(i)
-        }
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i)
       } else {
         pages.push(1)
         pages.push("...")
@@ -623,6 +626,7 @@ export function DocumentDashboard() {
     setTypeFilter("all")
     setEmisorFilter("all")
     setUserFilter("all")
+    setTrainingFilter("all")
     setFechaDocumentoDesde("")
     setFechaDocumentoHasta("")
     setFechaSubidaDesde("")
@@ -635,6 +639,7 @@ export function DocumentDashboard() {
     typeFilter !== "all" ||
     emisorFilter !== "all" ||
     userFilter !== "all" ||
+    trainingFilter !== "all" ||
     fechaDocumentoDesde !== "" ||
     fechaDocumentoHasta !== "" ||
     fechaSubidaDesde !== "" ||
@@ -643,294 +648,385 @@ export function DocumentDashboard() {
   const getSelectedDocumentsStatus = () => {
     const docs = documents.filter((doc) => selectedDocuments.has(doc.id))
     if (docs.length === 0) return null
-
     const firstStatus = docs[0].status
     const allSameStatus = docs.every((doc) => doc.status === firstStatus)
-
     return allSameStatus ? firstStatus : "mixed"
   }
 
   const selectedStatus = getSelectedDocumentsStatus()
 
-  const handleConfirm = () => {
-    console.log("[v0] Confirmar:", Array.from(selectedDocuments))
-    // TODO: Implement confirm logic - change status to "Confirmado"
+  const bulkIds = () => Array.from(selectedDocuments)
+
+  const setStatusLocal = (ids: string[], status: DocumentStatus) => {
+    setDocuments((prev) => prev.map((d) => (ids.includes(d.id) ? { ...d, status } : d)))
   }
 
-  const handleReject = () => {
-    console.log("[v0] Rechazar:", Array.from(selectedDocuments))
-    // TODO: Implement reject logic - change status to "Rechazado"
+  const handleReprocessReading = async () => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Reprocess Reading not implemented")
   }
 
-  const handleSend = () => {
-    console.log("[v0] Enviar:", Array.from(selectedDocuments))
-    // TODO: Implement send logic - change status to "Enviado"
+  const handleReprocessOutput = async () => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Reprocess Output not implemented")
   }
 
-  const handleIndividualConfirm = (docId: string) => {
-    console.log("[v0] Confirmar individual:", docId)
-    // TODO: Implement individual confirm logic
+  const handleDelete = () => {
+    setDocumentsToDelete(new Set(selectedDocuments))
+    setShowDeleteModal(true)
   }
 
-  const handleIndividualReject = (docId: string) => {
-    console.log("[v0] Rechazar individual:", docId)
-    // TODO: Implement individual reject logic
+  const handleConfirm = async () => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Bulk Confirm not implemented")
   }
 
-  const handleIndividualSend = (docId: string) => {
-    console.log("[v0] Enviar individual:", docId)
-    // TODO: Implement individual send logic
+  const handleReject = async () => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Bulk Reject not implemented")
   }
 
-  if (!isInitialized) {
-    return (
-      <div className="container mx-auto p-6 flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Verificando autenticación...</p>
-        </div>
-      </div>
-    )
+  const handleDownload = () => setShowDownloadModal(true)
+  const handleExport = () => setShowExportModal(true)
+
+  const handleDownloadFormat = async (format: "excel" | "txt") => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Download Format not implemented")
+    setShowDownloadModal(false)
   }
 
-  if (!isAuthenticated) {
-    return null
+  const handleExportOption = async (option: "api" | "excel" | "txt") => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Export Option not implemented")
+    setShowExportModal(false)
   }
 
-  if (isLoadingOrganizations && selectedOrganizationId === null) {
-    return <DashboardSkeleton />
+  const handleFinalize = async () => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Finalize not implemented")
   }
 
-  if (!isLoadingOrganizations && selectedOrganizationId === null) {
-    return (
-      <div className="container mx-auto p-6 flex flex-col items-center justify-center min-h-[400px] gap-4">
-        <p className="text-muted-foreground text-center max-w-md">
-          No se encontraron organizaciones disponibles para tu cuenta. Por favor, contacta al administrador para obtener
-          acceso.
-        </p>
-        <Button variant="outline" onClick={() => fetchOrganizations({ force: true })}>
-          Reintentar
-        </Button>
-      </div>
-    )
+  const handleIndividualConfirm = async (docId: string) => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Individual Confirm not implemented")
   }
+
+  const handleIndividualReject = async (docId: string) => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Individual Reject not implemented")
+  }
+
+  const handleIndividualFinalize = async (docId: string) => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Individual Finalize not implemented")
+  }
+
+  const handleIndividualDelete = (docId: string) => {
+    setDocumentsToDelete(new Set([docId]))
+    setShowDeleteModal(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Confirm Delete not implemented")
+    setShowDeleteModal(false)
+  }
+
+  const handleViewLogs = async (doc: DocumentRow) => {
+    setSelectedDocumentForLogs({ id: doc.id, filename: doc.filename, logs: [] })
+    setShowLogsModal(true)
+    // TODO: Implement with correct backend endpoint
+    console.log("View Logs not implemented")
+  }
+
+  const handleInlineStatusChange = async (docId: string, newStatus: DocumentStatus) => {
+    // TODO: Implement with correct backend endpoint
+    console.log("Inline Status Change not implemented")
+  }
+
+  const bulkDisabled = bulkBusy !== null || documentsLoading
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      <div className="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0">
+    <div className="container mx-auto p-3 space-y-4">
+      <div className="flex flex-col space-y-2 md:flex-row md:items-center md:justify-between md:space-y-0">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-balance">Procesamiento inteligente de documentos</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-balance">Procesamiento inteligente de documentos</h1>
+          <p className="text-xs text-muted-foreground mt-1">
+            {successPercentage}% confirmados · {documentsThisWeek} esta semana
+          </p>
         </div>
-        <Link href="/upload">
-          <Button size="lg" className="w-full md:w-auto">
-            <Upload className="mr-2 h-4 w-4" />
-            Subir Nuevo Documento
+        <div className="flex gap-2 w-full md:w-auto items-center">
+          <div className="w-[200px]">
+            <Select
+              value={selectedOrganizationId}
+              onValueChange={(val) => setSelectedOrganizationId(val)}
+              disabled={organizationsLoading}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Seleccionar Organización" />
+              </SelectTrigger>
+              <SelectContent>
+                {organizations.map((org) => (
+                  <SelectItem key={org.id} value={String(org.id)}>
+                    {org.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button
+            variant="outline"
+            className="w-full md:w-auto"
+            onClick={loadDocuments}
+            disabled={documentsLoading || bulkBusy !== null || !selectedOrganizationId}
+          >
+            {documentsLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Actualizar
           </Button>
-        </Link>
+          <Link href="/upload" className="w-full md:w-auto">
+            <Button size="default" className="w-full md:w-auto">
+              <Upload className="mr-2 h-4 w-4" />
+              Subir Nuevo Documento
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {documentsError && (
+        <div className="p-3 rounded-lg border bg-muted/50 text-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-destructive" />
+            <span>{documentsError}</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setDocumentsError(null)}>
+            <X className="h-4 w-4 mr-2" />
+            Cerrar
+          </Button>
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => handleMetricClick("all")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Documentos</CardTitle>
             <FileText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalDocuments}</div>
-            <p className="text-xs text-muted-foreground">{documentsThisWeek} esta semana</p>
+            <div className="text-2xl font-bold">{documentsLoading ? "—" : totalDocuments}</div>
+            <p className="text-xs text-muted-foreground">{documentsLoading ? "Cargando..." : `${documentsThisWeek} esta semana`}</p>
           </CardContent>
         </Card>
-        <Card
-          className="cursor-pointer hover:bg-muted/50 transition-colors"
-          onClick={() => handleMetricClick("Para revisar")}
-        >
+
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => handleMetricClick("Procesado")}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Procesados</CardTitle>
+            <CheckCircle className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{documentsLoading ? "—" : procesadoDocuments}</div>
+            <p className="text-xs text-muted-foreground">Haz clic para filtrarlos</p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => handleMetricClick("Para revisar")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Para revisar</CardTitle>
             <AlertCircle className="h-4 w-4 text-warning" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{paraRevisarDocuments}</div>
+            <div className="text-2xl font-bold">{documentsLoading ? "—" : paraRevisarDocuments}</div>
             <p className="text-xs text-muted-foreground">Haz clic para filtrarlos</p>
           </CardContent>
         </Card>
-        <Card
-          className="cursor-pointer hover:bg-muted/50 transition-colors"
-          onClick={() => handleMetricClick("Para confirmar")}
-        >
+
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => handleMetricClick("Error")}>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Para confirmar</CardTitle>
-            <Clock className="h-4 w-4 text-warning" />
+            <CardTitle className="text-sm font-medium">Errores</CardTitle>
+            <XCircle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{paraConfirmarDocuments}</div>
+            <div className="text-2xl font-bold">{documentsLoading ? "—" : errorDocuments}</div>
             <p className="text-xs text-muted-foreground">Haz clic para filtrarlos</p>
-          </CardContent>
-        </Card>
-        <Card
-          className="cursor-pointer hover:bg-muted/50 transition-colors"
-          onClick={() => handleMetricClick("Enviado")}
-        >
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Enviados</CardTitle>
-            <Send className="h-4 w-4 text-success" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{enviadosDocuments}</div>
-            <p className="text-xs text-muted-foreground">{successPercentage}% del total</p>
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Documentos</CardTitle>
-          <CardDescription>Gestiona y revisa todos los documentos procesados</CardDescription>
+        <CardHeader className="pb-0">
+          <CardTitle className="text-base">Documentos</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center">
-              <div className="flex-1 space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Buscar</label>
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar por ID, emisor o nombre de archivo..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Tipo</label>
-                  <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Todos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="Factura">Facturas</SelectItem>
-                      <SelectItem value="Remito">Remitos</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Estado</label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue placeholder="Todos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="Para revisar">Para revisar</SelectItem>
-                      <SelectItem value="Para confirmar">Para confirmar</SelectItem>
-                      <SelectItem value="Confirmado">Confirmado</SelectItem>
-                      <SelectItem value="Enviado">Enviado</SelectItem>
-                      <SelectItem value="Rechazado">Rechazado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Emisor</label>
-                  <Select value={emisorFilter} onValueChange={setEmisorFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Todos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      {uniqueEmisores.map((emisor: string) => (
-                        <SelectItem key={emisor} value={emisor}>
-                          {emisor}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-end">
-                  <Button variant="outline" size="default" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}>
-                    <Filter className="mr-2 h-4 w-4" />
-                    Más filtros
-                  </Button>
-                </div>
-                {hasActiveFilters && (
-                  <div className="flex items-end">
-                    <Button variant="ghost" size="default" onClick={clearAllFilters}>
-                      <X className="mr-2 h-4 w-4" />
-                      Limpiar
-                    </Button>
-                  </div>
-                )}
+
+        <CardContent className="pt-1 space-y-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <div className="flex-1">
+              <label className="text-xs font-medium text-muted-foreground">Buscar</label>
+              <div className="relative mt-0.5">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por ID, emisor o nombre de archivo..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8"
+                  disabled={documentsLoading}
+                />
               </div>
             </div>
 
-            {showAdvancedFilters && (
-              <div className="grid gap-3 p-4 border rounded-lg bg-muted/50 grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Fecha Doc. (Desde)</label>
-                  <Input
-                    type="date"
-                    value={fechaDocumentoDesde}
-                    onChange={(e) => setFechaDocumentoDesde(e.target.value)}
-                    className="text-sm"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Fecha Doc. (Hasta)</label>
-                  <Input
-                    type="date"
-                    value={fechaDocumentoHasta}
-                    onChange={(e) => setFechaDocumentoHasta(e.target.value)}
-                    className="text-sm"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Fecha Subida (Desde)</label>
-                  <Input
-                    type="date"
-                    value={fechaSubidaDesde}
-                    onChange={(e) => setFechaSubidaDesde(e.target.value)}
-                    className="text-sm"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Fecha Subida (Hasta)</label>
-                  <Input
-                    type="date"
-                    value={fechaSubidaHasta}
-                    onChange={(e) => setFechaSubidaHasta(e.target.value)}
-                    className="text-sm"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Usuario</label>
-                  <Select value={userFilter} onValueChange={setUserFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Todos" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="myDocuments">Mis documentos</SelectItem>
-                      <SelectItem value="user1">Juan Pérez</SelectItem>
-                      <SelectItem value="user2">María González</SelectItem>
-                      <SelectItem value="user3">Carlos Rodríguez</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+            <div className="flex gap-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Tipo</label>
+                <Select value={typeFilter} onValueChange={setTypeFilter} disabled={documentsLoading}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="Factura">Facturas</SelectItem>
+                    <SelectItem value="Remito">Remitos</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardContent className="p-0">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Estado</label>
+                <Select value={statusFilter} onValueChange={setStatusFilter} disabled={documentsLoading}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="Para revisar">Para revisar</SelectItem>
+                    <SelectItem value="Procesado">Procesado</SelectItem>
+                    <SelectItem value="Error">Error</SelectItem>
+                    <SelectItem value="Confirmado">Confirmado</SelectItem>
+                    <SelectItem value="Exportado">Exportado</SelectItem>
+                    <SelectItem value="Finalizado">Finalizado</SelectItem>
+                    <SelectItem value="Rechazado">Rechazado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Emisor</label>
+                <Select value={emisorFilter} onValueChange={setEmisorFilter} disabled={documentsLoading}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {uniqueEmisores.map((emisor) => (
+                      <SelectItem key={emisor} value={emisor}>
+                        {emisor}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  size="default"
+                  onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  disabled={documentsLoading}
+                >
+                  <Filter className="mr-2 h-4 w-4" />
+                  Más filtros
+                </Button>
+              </div>
+
+              {hasActiveFilters && (
+                <div className="flex items-end">
+                  <Button variant="ghost" size="default" onClick={clearAllFilters} disabled={documentsLoading}>
+                    <X className="mr-2 h-4 w-4" />
+                    Limpiar
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {showAdvancedFilters && (
+            <div className="grid gap-2 p-3 border rounded-lg bg-muted/50 grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Fecha Doc. (Desde)</label>
+                <Input
+                  type="date"
+                  value={fechaDocumentoDesde}
+                  onChange={(e) => setFechaDocumentoDesde(e.target.value)}
+                  className="text-sm"
+                  disabled={documentsLoading}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Fecha Doc. (Hasta)</label>
+                <Input
+                  type="date"
+                  value={fechaDocumentoHasta}
+                  onChange={(e) => setFechaDocumentoHasta(e.target.value)}
+                  className="text-sm"
+                  disabled={documentsLoading}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Fecha Subida (Desde)</label>
+                <Input
+                  type="date"
+                  value={fechaSubidaDesde}
+                  onChange={(e) => setFechaSubidaDesde(e.target.value)}
+                  className="text-sm"
+                  disabled={documentsLoading}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Fecha Subida (Hasta)</label>
+                <Input
+                  type="date"
+                  value={fechaSubidaHasta}
+                  onChange={(e) => setFechaSubidaHasta(e.target.value)}
+                  className="text-sm"
+                  disabled={documentsLoading}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Usuario</label>
+                <Select value={userFilter} onValueChange={setUserFilter} disabled={documentsLoading}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="myDocuments">Mis documentos</SelectItem>
+                    <SelectItem value="user1">Juan Pérez</SelectItem>
+                    <SelectItem value="user2">María González</SelectItem>
+                    <SelectItem value="user3">Carlos Rodríguez</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Entrenamiento</label>
+                <Select value={trainingFilter} onValueChange={setTrainingFilter} disabled={documentsLoading}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="training">Usados en entrenamiento</SelectItem>
+                    <SelectItem value="notTraining">No usados</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
           {selectedDocuments.size > 0 && (
-            <div className="flex items-center justify-between gap-4 p-4 border-b bg-muted/50">
+            <div className="p-2 bg-muted/50 border-b flex items-center justify-between">
               <div className="text-sm font-medium">
                 {selectedDocuments.size} documento{selectedDocuments.size > 1 ? "s" : ""} seleccionado
                 {selectedDocuments.size > 1 ? "s" : ""}
@@ -938,58 +1034,106 @@ export function DocumentDashboard() {
                   <span className="ml-2 text-xs text-destructive">(diferentes estados - no se pueden cambiar)</span>
                 )}
               </div>
+
               <div className="flex items-center gap-2">
                 {selectedStatus && selectedStatus !== "mixed" && (
                   <>
-                    {(selectedStatus === "Para revisar" || selectedStatus === "Para confirmar") && (
+                    {(selectedStatus === "Procesado" || selectedStatus === "Para revisar") && (
                       <>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={handleConfirm}
-                          className="text-green-600 hover:bg-green-600/10"
+                          disabled={bulkDisabled}
+                          className="text-green-600 hover:bg-green-600/10 bg-transparent"
                         >
-                          <CheckCircle className="h-4 w-4 mr-2" />
+                          {bulkBusy === "confirm" ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                          )}
                           Confirmar
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={handleReject}
-                          className="text-destructive hover:bg-destructive/10"
+                          disabled={bulkDisabled}
+                          className="text-destructive hover:bg-destructive/10 bg-transparent"
                         >
-                          <XCircle className="h-4 w-4 mr-2" />
+                          {bulkBusy === "reject" ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <XCircle className="h-4 w-4 mr-2" />
+                          )}
                           Rechazar
                         </Button>
                       </>
                     )}
+
                     {selectedStatus === "Confirmado" && (
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={handleSend}
-                        className="text-green-600 hover:bg-green-600/10"
+                        onClick={handleExport}
+                        disabled={bulkDisabled}
+                        className="text-green-600 hover:bg-green-600/10 bg-transparent"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Enviar
+                        Exportar
+                      </Button>
+                    )}
+
+                    {selectedStatus === "Exportado" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleFinalize}
+                        disabled={bulkDisabled}
+                        className="text-green-600 hover:bg-green-600/10 bg-transparent"
+                      >
+                        {bulkBusy === "finalize" ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Finalizar
                       </Button>
                     )}
                   </>
                 )}
-                <Button variant="outline" size="sm" onClick={handleReprocessReading}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
+
+                <Button variant="outline" size="sm" onClick={handleReprocessReading} disabled={bulkDisabled}>
+                  {bulkBusy === "reprocessR" ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
                   Reprocesar lectura
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleReprocessOutput}>
-                  <FileOutput className="h-4 w-4 mr-2" />
+
+                <Button variant="outline" size="sm" onClick={handleReprocessOutput} disabled={bulkDisabled}>
+                  {bulkBusy === "reprocessA" ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileOutput className="h-4 w-4 mr-2" />
+                  )}
                   Reprocesar Asistente
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleExport}>
+
+                <Button variant="outline" size="sm" onClick={handleDownload} disabled={bulkDisabled}>
                   <Download className="h-4 w-4 mr-2" />
-                  Exportar
+                  Descargar
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleDelete} className="text-destructive hover:bg-destructive/10">
-                  <Trash2 className="h-4 w-4 mr-2" />
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={bulkDisabled}
+                  className="text-destructive hover:bg-destructive/10 bg-transparent"
+                >
+                  <Trash2 className="h-4 w-4 mr-2 text-destructive" />
                   Eliminar
                 </Button>
               </div>
@@ -999,46 +1143,53 @@ export function DocumentDashboard() {
           <TooltipProvider>
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-muted/50">
                   <TableHead className="w-12">
                     <Checkbox
                       checked={isAllSelected}
-                      onCheckedChange={handleSelectAll}
+                      onCheckedChange={(v) => handleSelectAll(Boolean(v))}
                       aria-label="Seleccionar todos"
                       className={isSomeSelected ? "data-[state=checked]:bg-primary/50" : ""}
+                      disabled={documentsLoading}
                     />
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("id")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("id")}>
                     <div className="flex items-center gap-2">
                       ID
                       {getSortIcon("id")}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("tipo")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("tipo")}>
                     <div className="flex items-center gap-2">
                       Tipo
                       {getSortIcon("tipo")}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("emisor")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("emisor")}>
                     <div className="flex items-center gap-2">
                       Emisor
                       {getSortIcon("emisor")}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("fechaDocumento")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("fechaDocumento")}>
                     <div className="flex items-center gap-2">
                       Fecha Documento
                       {getSortIcon("fechaDocumento")}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("fechaSubida")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("fechaSubida")}>
                     <div className="flex items-center gap-2">
                       Fecha Subida
                       {getSortIcon("fechaSubida")}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("estado")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("estado")}>
                     <div className="flex items-center gap-2">
                       Estado
                       <Tooltip>
@@ -1050,50 +1201,81 @@ export function DocumentDashboard() {
                             <strong>Para revisar:</strong> Requiere revisión de observaciones
                           </div>
                           <div className="text-xs">
-                            <strong>Para confirmar:</strong> Listo para enviar o exportar
+                            <strong>Procesado:</strong> Documento procesado correctamente
                           </div>
                           <div className="text-xs">
-                            <strong>Confirmado:</strong> Procesado correctamente
+                            <strong>Error:</strong> Error durante el procesamiento
                           </div>
                           <div className="text-xs">
-                            <strong>Enviado:</strong> Enviado correctamente a destino
+                            <strong>Confirmado:</strong> Listo para exportar
                           </div>
                           <div className="text-xs">
-                            <strong>Rechazado:</strong> No será enviado
+                            <strong>Exportado:</strong> Documento exportado correctamente
+                          </div>
+                          <div className="text-xs">
+                            <strong>Finalizado:</strong> Proceso completado
+                          </div>
+                          <div className="text-xs">
+                            <strong>Rechazado:</strong> Documento rechazado
                           </div>
                         </TooltipContent>
                       </Tooltip>
                       {getSortIcon("estado")}
                     </div>
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort("archivo")}>
+
+                  <TableHead className="cursor-pointer select-none text-left" onClick={() => handleSort("archivo")}>
                     <div className="flex items-center gap-2">
                       Nombre del Archivo
                       {getSortIcon("archivo")}
                     </div>
                   </TableHead>
+
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-                {isLoadingDocuments ? (
-                  <>
-                    {[...Array(3)].map((_, i) => (
-                      <TableRow key={`skeleton-${i}`}>
-                        <TableCell colSpan={9}>
-                          <Skeleton className="h-12 w-full" />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </>
+                {documentsLoading ? (
+                  Array.from({ length: 6 }).map((_, idx) => (
+                    <TableRow key={`sk-${idx}`} className="hover:bg-muted/50">
+                      <TableCell>
+                        <div className="h-4 w-4 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-5 w-20 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-40 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-6 w-24 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="h-4 w-60 rounded bg-muted animate-pulse" />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="h-8 w-10 ml-auto rounded bg-muted animate-pulse" />
+                      </TableCell>
+                    </TableRow>
+                  ))
                 ) : paginatedDocuments.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
-                      No se encontraron documentos
+                    <TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">
+                      No hay documentos para mostrar.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedDocuments.map((doc: DocumentRow) => (
+                  paginatedDocuments.map((doc) => (
                     <TableRow
                       key={doc.id}
                       onClick={() => router.push(`/document/${doc.id}`)}
@@ -1102,87 +1284,133 @@ export function DocumentDashboard() {
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={selectedDocuments.has(doc.id)}
-                          onCheckedChange={(checked) => handleSelectDocument(doc.id, checked as boolean)}
+                          onCheckedChange={(checked) => handleSelectDocument(doc.id, Boolean(checked))}
                           aria-label={`Seleccionar ${doc.filename}`}
+                          disabled={rowBusy[doc.id]}
                         />
                       </TableCell>
+
                       <TableCell className="font-mono text-sm text-muted-foreground">{doc.id}</TableCell>
+
                       <TableCell>
                         <Badge variant="outline">{doc.type}</Badge>
                       </TableCell>
+
                       <TableCell className="text-sm text-muted-foreground">{doc.supplier}</TableCell>
+
                       <TableCell className="text-sm">{doc.documentDate}</TableCell>
                       <TableCell className="text-sm">{doc.uploadDate}</TableCell>
-                      <TableCell>{getStatusBadge(doc.status)}</TableCell>
+
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          {getStatusBadge(doc.status, (newStatus) => handleInlineStatusChange(doc.id, newStatus as DocumentStatus))}
+                          {rowBusy[doc.id] && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                        </div>
+                      </TableCell>
+
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4 text-muted-foreground" />
                           <span>{doc.filename}</span>
-                          {doc.relatedDocumentsCount > 0 && (
-                            <Badge variant="secondary" className="ml-2 text-xs">
-                              <Link2 className="h-3 w-3 mr-1" />
-                              {doc.relatedDocumentsCount}
+                          {doc.relatedDocuments && doc.relatedDocuments.length > 0 && (
+                            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
+                              <Link2 className="h-3 w-3 mr-1 inline" />
+                              {doc.relatedDocuments.length}
                             </Badge>
                           )}
                         </div>
                       </TableCell>
+
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreVertical className="h-4 w-4" />
+                              <Button variant="ghost" size="sm" disabled={rowBusy[doc.id]}>
+                                {rowBusy[doc.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreVertical className="h-4 w-4" />}
                               </Button>
                             </DropdownMenuTrigger>
+
                             <DropdownMenuContent align="end">
-                              {(doc.status === "Para revisar" || doc.status === "Para confirmar") && (
+                              {(doc.status === "Procesado" || doc.status === "Para revisar") && (
                                 <>
-                                  <DropdownMenuItem
-                                    onClick={() => handleIndividualConfirm(doc.id)}
-                                    className="text-green-600"
-                                  >
+                                  <DropdownMenuItem onClick={() => handleIndividualConfirm(doc.id)} className="text-green-600">
                                     <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
                                     Confirmar
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => handleIndividualReject(doc.id)}
-                                    className="text-destructive"
-                                  >
+                                  <DropdownMenuItem onClick={() => handleIndividualReject(doc.id)} className="text-destructive">
                                     <XCircle className="h-4 w-4 mr-2 text-destructive" />
                                     Rechazar
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                 </>
                               )}
+
                               {doc.status === "Confirmado" && (
                                 <>
                                   <DropdownMenuItem
-                                    onClick={() => handleIndividualSend(doc.id)}
+                                    onClick={() => {
+                                      setSelectedDocuments(new Set([doc.id]))
+                                      handleExport()
+                                    }}
                                     className="text-green-600"
                                   >
                                     <Send className="h-4 w-4 mr-2 text-green-600" />
-                                    Enviar
+                                    Exportar
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                 </>
                               )}
-                              <DropdownMenuItem onClick={() => handleIndividualReprocessReading(doc.id)}>
+
+                              {doc.status === "Exportado" && (
+                                <>
+                                  <DropdownMenuItem onClick={() => handleIndividualFinalize(doc.id)} className="text-green-600">
+                                    <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                                    Finalizar
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                </>
+                              )}
+
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedDocuments(new Set([doc.id]))
+                                  handleReprocessReading()
+                                }}
+                              >
                                 <RefreshCw className="h-4 w-4 mr-2" />
                                 Reprocesar lectura
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleIndividualReprocessOutput(doc.id)}>
+
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedDocuments(new Set([doc.id]))
+                                  handleReprocessOutput()
+                                }}
+                              >
                                 <FileOutput className="h-4 w-4 mr-2" />
                                 Reprocesar Asistente
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleIndividualExport(doc.id)}>
-                                <Download className="h-4 w-4 mr-2" />
-                                Exportar
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
+
                               <DropdownMenuItem
-                                onClick={() => handleIndividualDelete(doc.id)}
-                                className="text-destructive"
+                                onClick={() => {
+                                  setSelectedDocuments(new Set([doc.id]))
+                                  handleDownload()
+                                }}
                               >
+                                <Download className="h-4 w-4 mr-2" />
+                                Descargar
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSeparator />
+
+                              <DropdownMenuItem onClick={() => handleViewLogs(doc)}>
+                                <Clock className="h-4 w-4 mr-2" />
+                                Ver historial
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSeparator />
+
+                              <DropdownMenuItem onClick={() => handleIndividualDelete(doc.id)} className="text-destructive">
                                 <Trash2 className="h-4 w-4 mr-2 text-destructive" />
                                 Eliminar
                               </DropdownMenuItem>
@@ -1197,12 +1425,13 @@ export function DocumentDashboard() {
             </Table>
           </TooltipProvider>
 
-          {totalDocuments > 0 && (
-            <div className="flex items-center justify-between gap-4 p-4 border-t">
+          {sortedDocuments.length > 0 && (
+            <div className="flex items-center justify-between gap-4 p-3 border-t">
               <div className="flex items-center gap-4">
                 <p className="text-sm text-muted-foreground">
-                  Mostrando {((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalDocuments)} de {totalDocuments} resultados
+                  Mostrando {startIndex + 1}-{Math.min(endIndex, sortedDocuments.length)} de {sortedDocuments.length} resultados
                 </p>
+
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Filas por página:</span>
                   <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
@@ -1220,12 +1449,7 @@ export function DocumentDashboard() {
               </div>
 
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
-                >
+                <Button variant="outline" size="sm" onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1}>
                   Anterior
                 </Button>
 
@@ -1265,6 +1489,124 @@ export function DocumentDashboard() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={showDownloadModal} onOpenChange={setShowDownloadModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Descargar documentos</DialogTitle>
+            <DialogDescription>Selecciona el formato de descarga</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-4">
+            <Button
+              onClick={() => handleDownloadFormat("excel")}
+              variant="outline"
+              className="w-full justify-start bg-muted/50 hover:bg-muted"
+              disabled={bulkBusy === "download"}
+            >
+              {bulkBusy === "download" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+              Excel
+            </Button>
+            <Button
+              onClick={() => handleDownloadFormat("txt")}
+              variant="outline"
+              className="w-full justify-start bg-muted/50 hover:bg-muted"
+              disabled={bulkBusy === "download"}
+            >
+              {bulkBusy === "download" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+              TXT
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Exportar documentos</DialogTitle>
+            <DialogDescription>Selecciona el destino de exportación</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 py-4">
+            <Button
+              onClick={() => handleExportOption("api")}
+              variant="outline"
+              className="w-full justify-start bg-muted/50 hover:bg-muted"
+              disabled={bulkBusy === "export"}
+            >
+              {bulkBusy === "export" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Enviar por API al sistema contable
+            </Button>
+
+            <Button
+              onClick={() => handleExportOption("excel")}
+              variant="outline"
+              className="w-full justify-start bg-muted/50 hover:bg-muted"
+              disabled={bulkBusy === "export"}
+            >
+              {bulkBusy === "export" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+              Excel
+            </Button>
+
+            <Button
+              onClick={() => handleExportOption("txt")}
+              variant="outline"
+              className="w-full justify-start bg-muted/50 hover:bg-muted"
+              disabled={bulkBusy === "export"}
+            >
+              {bulkBusy === "export" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileText className="h-4 w-4 mr-2" />}
+              TXT
+            </Button>
+
+            <div className="flex items-center space-x-2 pt-4 border-t">
+              <input
+                type="checkbox"
+                id="markFinished"
+                checked={markAsFinished}
+                onChange={(e) => setMarkAsFinished(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <label htmlFor="markFinished" className="text-sm font-medium">
+                Marcar como finalizado
+              </label>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteModal} onOpenChange={setShowDeleteModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar eliminación</DialogTitle>
+            <DialogDescription>
+              {documentsToDelete.size === 1
+                ? "¿Estás seguro de que deseas eliminar este documento?"
+                : `¿Estás seguro de que deseas eliminar ${documentsToDelete.size} documentos?`}{" "}
+              Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="outline" onClick={() => setShowDeleteModal(false)} disabled={bulkBusy === "delete"}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDelete} disabled={bulkBusy === "delete"}>
+              {bulkBusy === "delete" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Eliminar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {selectedDocumentForLogs && (
+        <DocumentLogsModal
+          isOpen={showLogsModal}
+          onClose={() => {
+            setShowLogsModal(false)
+            setSelectedDocumentForLogs(null)
+          }}
+          documentId={selectedDocumentForLogs.id}
+          documentName={selectedDocumentForLogs.filename}
+          logs={selectedDocumentForLogs.logs}
+        />
+      )}
     </div>
   )
 }

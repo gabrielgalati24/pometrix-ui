@@ -8,7 +8,7 @@ import { Loader2 } from "lucide-react"
 
 export default function DocumentPage() {
   const params = useParams()
-  const id = params.id as string
+  const id = params.id?.toString() ?? ""
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -21,7 +21,7 @@ export default function DocumentPage() {
         setError(null)
 
         // Fetch document with group from backend
-        const response = await documentsService.getDocumentById(Number(id))
+        const response = await documentsService.getDocumentById(id)
         setDocumentData(response)
 
       } catch (err) {

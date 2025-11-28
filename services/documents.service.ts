@@ -158,8 +158,9 @@ export const documentsService = {
         return response.json()
     },
 
-    async getDocumentById(documentId: number): Promise<DocumentWithGroup> {
-        const url = `${API_BASE_URL}/document/?document_id=${documentId}`
+    async getDocumentById(documentId: number | string): Promise<DocumentWithGroup> {
+        const idParam = typeof documentId === "string" ? documentId : documentId.toString()
+        const url = `${API_BASE_URL}/document/?document_id=${encodeURIComponent(idParam)}`
 
         const response = await fetch(url, {
             method: "GET",

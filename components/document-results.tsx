@@ -1,7 +1,8 @@
 ﻿"use client"
 
-import type React from "react"
-import { useState, useEffect, useId, useCallback, type CSSProperties } from "react"
+import React, { useRef, useCallback, useId } from "react"
+
+import { useState, useEffect, type CSSProperties } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -10,7 +11,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { FileText, FileStack, Layers, Eye, EyeOff, Database, ArrowLeft, ChevronRight, ChevronLeft, Maximize2, Minimize2, RefreshCw, Loader2, Pencil, GripVertical, Brain, CheckCircle2, FileOutput, Download, Trash2, CheckCircle, XCircle, Send, AlertCircle, Clock, FileSpreadsheet } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { FileText, FileStack, Layers, Eye, EyeOff, Database, ArrowLeft, ChevronRight, ChevronLeft, Maximize2, Minimize2, RefreshCw, Loader2, Pencil, GripVertical, Brain, CheckCircle2, FileOutput, Download, Trash2, CheckCircle, XCircle, Send, AlertCircle, Clock, FileSpreadsheet, Info } from 'lucide-react'
 import Link from "next/link"
 import { useRouter } from 'next/navigation'
 import {
@@ -23,6 +30,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core"
+import { DocumentLogsModal } from "./document-logs-modal"
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers"
 import { SortableContext, horizontalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
@@ -30,6 +38,39 @@ import { documentsService, type Document, type DocumentGroup, type DocumentWithG
 import { useToast } from "@/hooks/use-toast"
 
 // --- Interfaces ---
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string") {
+    const normalized = value.replace(/,/g, ".")
+    const parsed = Number(normalized)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+const formatDecimal = (value?: number): string => {
+  if (value === undefined) return ""
+  return new Intl.NumberFormat("es-UY", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+const formatMonetary = (value?: number, currency?: string): string => {
+  if (value === undefined) return ""
+  if (currency) {
+    try {
+      return new Intl.NumberFormat("es-UY", {
+        style: "currency",
+        currency,
+      }).format(value)
+    } catch (error) {
+      console.warn("[DocumentResults] Currency format warning:", error)
+    }
+  }
+  return formatDecimal(value)
+}
 
 interface ExtractedData {
   documentInfo: {
@@ -47,7 +88,7 @@ interface ExtractedData {
   items: Array<{
     id: string
     description: string
-    quantity: number
+    quantity?: number
     unitPrice?: number
     subtotal?: number
     iva?: number
@@ -62,6 +103,11 @@ interface ExtractedData {
     journalEntryId?: number
     humanInput?: string
   }
+  summary?: {
+    totalAmount?: number
+    currency?: string
+    taxCode?: string
+  }
 }
 
 type ViewMode = "documento" | "datos" | "resultado"
@@ -74,6 +120,26 @@ const mapDocumentToExtractedData = (doc: Document): ExtractedData => {
   console.log("[DocumentResults] Journal Entry:", journalEntry)
   let headers: string[] = []
   let rows: Array<Record<string, string | number>> = []
+  const payload = (doc.data ?? {}) as Record<string, any>
+
+  const rawItems = Array.isArray(payload.items) ? payload.items : []
+  const mappedItems = rawItems.map((item, idx) => {
+    const qty = toNumber(item.qty)
+    const unitAmount = toNumber(item.unit_amount)
+    const subtotal = toNumber(item.subtotal) ?? (qty !== undefined && unitAmount !== undefined ? Number((qty * unitAmount).toFixed(2)) : undefined)
+    const total = toNumber(item.total) ?? toNumber(item.total_amount) ?? subtotal
+    const iva = toNumber(item.iva)
+
+    return {
+      id: item.id?.toString() ?? item.codigo?.toString() ?? `${idx + 1}`,
+      description: typeof item.description === "string" ? item.description : "",
+      quantity: qty,
+      unitPrice: unitAmount,
+      subtotal,
+      iva,
+      total,
+    }
+  })
 
   if (journalEntry && journalEntry.normalized_journal_fields) {
     const fieldNames = new Set<string>()
@@ -91,20 +157,26 @@ const mapDocumentToExtractedData = (doc: Document): ExtractedData => {
     rows = Array.from(rowsMap.values()) as Array<Record<string, string | number>>
   }
 
+  const documentDate = typeof payload.date === "string" && payload.date.trim() ? payload.date : (doc.date_document || new Date().toISOString().split('T')[0])
+  const documentNumber = payload.codigo_factura ? String(payload.codigo_factura) : doc.id.toString()
+  const supplierName = typeof payload.provider === "string" && payload.provider.trim()
+    ? payload.provider
+    : (doc.organization_name || "Desconocido")
+
   return {
     documentInfo: {
       type: doc.document_type || "Documento",
-      number: doc.id.toString(),
-      date: doc.date_document || new Date().toISOString().split('T')[0],
+      number: documentNumber,
+      date: documentDate,
       filename: doc.document_name || "documento.pdf",
       url: doc.document_url,
     },
     supplier: {
-      name: doc.organization_name || "Desconocido",
-      cuit: "",
-      address: "",
+      name: supplierName,
+      cuit: payload.rut ? String(payload.rut) : "",
+      address: payload.address || payload.direccion || "",
     },
-    items: [], // TODO: Populate if available in doc.data
+    items: mappedItems,
     accountingEntry: {
       outputTable: {
         headers: headers.length > 0 ? headers : ["ID", "Cuenta", "Debe", "Haber", "Descripción"],
@@ -113,6 +185,11 @@ const mapDocumentToExtractedData = (doc: Document): ExtractedData => {
       entries: [],
       journalEntryId: journalEntry?.id,
       humanInput: typeof journalEntry?.human_input === 'string' ? journalEntry.human_input : ""
+    },
+    summary: {
+      totalAmount: toNumber(payload.total_amount) ?? mappedItems.reduce((acc, item) => acc + (item.total ?? 0), 0),
+      currency: typeof payload.currency === "string" ? payload.currency : undefined,
+      taxCode: typeof payload.tax_cod === "string" ? payload.tax_cod : undefined,
     }
   }
 }
@@ -225,15 +302,25 @@ export function DocumentResults({
 
   // Reasoning State
   const [showReasoningModal, setShowReasoningModal] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
   const [currentReasoning, setCurrentReasoning] = useState<any>(null)
 
   const [documentStatus, setDocumentStatus] = useState<string>("Para confirmar")
-
   const router = useRouter()
   const { toast } = useToast()
+
+  const [columnWidths, setColumnWidths] = useState<number[]>([33.33, 33.33, 33.33])
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [startX, setStartX] = useState<number>(0)
+  const [startWidths, setStartWidths] = useState<number[]>([])
+
+  const columnsContainerRef = useRef<HTMLDivElement>(null)
+  const sensors = useSensors(useSensor(MouseSensor, {}), useSensor(TouchSensor, {}), useSensor(KeyboardSensor, {}))
+
+  // Unique IDs for DndContext components
   const datosDndId = useId()
   const resultadoDndId = useId()
-  const sensors = useSensors(useSensor(MouseSensor, {}), useSensor(TouchSensor, {}), useSensor(KeyboardSensor, {}))
 
   // --- Effects ---
 
@@ -315,11 +402,13 @@ export function DocumentResults({
     const itemsRows = extracted.items.map(item => [
       item.id,
       item.description,
-      item.quantity.toString(),
-      item.unitPrice?.toString() || "",
-      item.subtotal?.toString() || "",
-      item.iva?.toString() || "",
-      item.total?.toString() || ""
+      formatDecimal(item.quantity),
+      formatMonetary(item.unitPrice, extracted.summary?.currency),
+      formatMonetary(item.subtotal, extracted.summary?.currency),
+      item.iva !== undefined
+        ? formatMonetary(item.iva, extracted.summary?.currency)
+        : (extracted.summary?.taxCode || ""),
+      formatMonetary(item.total, extracted.summary?.currency)
     ])
     setDatosTableData(itemsRows)
 
@@ -341,11 +430,16 @@ export function DocumentResults({
     }
 
     // 3. General Info
+    const totalDisplay =
+      formatMonetary(extracted.summary?.totalAmount, extracted.summary?.currency) ||
+      formatMonetary(extracted.items.reduce((acc, item) => acc + (item.total ?? 0), 0), extracted.summary?.currency) ||
+      "0"
+
     setDatosGeneralesDatos({
       proveedor: extracted.supplier.name,
       numeroFactura: extracted.documentInfo.number,
       fecha: extracted.documentInfo.date,
-      total: extracted.items.reduce((acc, item) => acc + (item.total || 0), 0).toString() // Simple calc
+      total: totalDisplay
     })
 
     setDatosGeneralesResultado({
@@ -357,8 +451,106 @@ export function DocumentResults({
 
   }, [activeTab, allRelatedDocuments, documentGroup, loading, documentStatus])
 
+  // Initialize column widths based on visible views
+  useEffect(() => {
+    const visibleViews = expandedView
+      ? [expandedView]
+      : ["documento", "datos", "resultado"].filter((view) => activeViews.has(view as ViewMode))
+    const columnCount = visibleViews.length
 
-  // --- Handlers ---
+    if (columnCount === 1) {
+      setColumnWidths([100])
+    } else if (columnCount === 2) {
+      setColumnWidths([50, 50])
+    } else if (columnCount === 3) {
+      setColumnWidths([33.33, 33.33, 33.34])
+    }
+  }, [activeViews.size, expandedView])
+
+  // Handle mouse move during resize
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!isDragging || dragIndex === null || !columnsContainerRef.current) return
+
+      const containerWidth = columnsContainerRef.current.getBoundingClientRect().width
+      if (containerWidth === 0) return
+
+      const deltaX = e.clientX - startX
+      const deltaPercent = (deltaX / containerWidth) * 100
+
+      setColumnWidths((prev) => {
+        const newWidths = [...startWidths]
+        const visibleViews = expandedView
+          ? [expandedView]
+          : ["documento", "datos", "resultado"].filter((view) => activeViews.has(view as ViewMode))
+        const columnCount = visibleViews.length
+
+        if (columnCount === 2) {
+          newWidths[0] = Math.max(20, Math.min(80, startWidths[0] + deltaPercent))
+          newWidths[1] = 100 - newWidths[0]
+        } else if (columnCount === 3) {
+          if (dragIndex === 0) {
+            newWidths[0] = Math.max(15, Math.min(70, startWidths[0] + deltaPercent))
+            const remaining = 100 - newWidths[0]
+            const ratio = startWidths[2] / (startWidths[1] + startWidths[2])
+            newWidths[1] = remaining * (1 - ratio)
+            newWidths[2] = remaining * ratio
+          } else {
+            const total01 = startWidths[0] + startWidths[1]
+            const newTotal = Math.max(startWidths[0] + 15, Math.min(85, total01 + deltaPercent))
+            newWidths[1] = newTotal - startWidths[0]
+            newWidths[2] = 100 - newTotal
+
+            if (newWidths[1] < 15) {
+              newWidths[1] = 15
+              newWidths[2] = 100 - startWidths[0] - 15
+            }
+            if (newWidths[2] < 15) {
+              newWidths[2] = 15
+              newWidths[1] = 100 - startWidths[0] - 15
+            }
+          }
+        }
+
+        return newWidths
+      })
+    },
+    [isDragging, dragIndex, startX, startWidths, expandedView, activeViews],
+  )
+
+  // Handle mouse up to stop resizing
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+    setDragIndex(null)
+  }, [])
+
+  // Setup global event listeners
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    if (!isDragging) return
+
+    window.addEventListener("mousemove", handleMouseMove)
+    window.addEventListener("mouseup", handleMouseUp)
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove)
+      window.removeEventListener("mouseup", handleMouseUp)
+    }
+  }, [isDragging, handleMouseMove, handleMouseUp])
+
+  const handleResizeStart = (e: React.MouseEvent, index: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    if (!columnsContainerRef.current) return
+
+    setIsDragging(true)
+    setDragIndex(index)
+    setStartX(e.clientX)
+    setStartWidths([...columnWidths])
+  }
+
+
 
   const handleConfirm = async () => {
     try {
@@ -609,14 +801,41 @@ export function DocumentResults({
   // --- Render Helpers ---
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "Para revisar": return <Badge variant="secondary" className="bg-yellow-600 text-white flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3.5" />Para revisar</Badge>
-      case "Para confirmar": return <Badge variant="secondary" className="bg-yellow-600 text-white flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />Para confirmar</Badge>
-      case "Confirmado": return <Badge variant="default" className="bg-success text-success-foreground flex items-center gap-1.5"><CheckCircle className="h-3.5 w-3.5" />Confirmado</Badge>
-      case "Enviado": return <Badge variant="default" className="bg-success text-success-foreground flex items-center gap-1.5"><Send className="h-3.5 w-3.5" />Enviado</Badge>
-      case "Rechazado": return <Badge variant="destructive" className="flex items-center gap-1.5"><XCircle className="h-3.5 w-3.5" />Rechazado</Badge>
-      default: return <Badge variant="outline">{status}</Badge>
+    const statusConfig: Record<string, { color: string; icon: any; label: string }> = {
+      "Para revisar": { color: "bg-yellow-500", icon: AlertCircle, label: "Para revisar" },
+      "Para confirmar": { color: "bg-blue-500", icon: Clock, label: "Para confirmar" },
+      "Confirmado": { color: "bg-green-500", icon: CheckCircle, label: "Confirmado" },
+      "Enviado": { color: "bg-purple-500", icon: Send, label: "Enviado" },
+      "Rechazado": { color: "bg-red-500", icon: XCircle, label: "Rechazado" },
+      "Procesado": { color: "bg-teal-500", icon: CheckCircle2, label: "Procesado" },
+      "Error": { color: "bg-red-600", icon: AlertCircle, label: "Error" },
+      "Exportado": { color: "bg-indigo-500", icon: FileOutput, label: "Exportado" },
+      "Finalizado": { color: "bg-slate-500", icon: CheckCircle, label: "Finalizado" },
     }
+
+    const config = statusConfig[status] || { color: "bg-gray-500", icon: Info, label: status }
+    const Icon = config.icon
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Badge
+            variant="secondary"
+            className={`${config.color} text-white flex items-center gap-1.5 cursor-pointer hover:opacity-90 transition-opacity`}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {config.label}
+          </Badge>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {Object.keys(statusConfig).map((s) => (
+            <DropdownMenuItem key={s} onClick={() => setDocumentStatus(s)}>
+              {s}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
   }
 
   const getPdfUrl = (context: "consolidated" | "main" | "related", docIndex?: number) => {
@@ -643,10 +862,10 @@ export function DocumentResults({
     const isXlsx = url?.match(/\.(xlsx|xls)$/i)
 
     return (
-      <Card className="h-full flex flex-col">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 shrink-0">
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
+      <Card className="h-full">
+        <CardHeader className="flex flex-row items-center justify-between py-0.5 px-6">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4" />
             Documento original
           </CardTitle>
           <Tooltip>
@@ -660,12 +879,12 @@ export function DocumentResults({
             </TooltipContent>
           </Tooltip>
         </CardHeader>
-        <CardContent className="space-y-4 flex-1 flex flex-col min-h-0">
+        <CardContent className="space-y-4">
           {context === "consolidated" && (
-            <div className="flex gap-2 shrink-0">
+            <div className="flex gap-1.5">
               <Button
                 variant={selectedConsolidatedDoc === "main" ? "default" : "outline"}
-                size="sm"
+                className="h-7 text-xs"
                 onClick={() => setSelectedConsolidatedDoc("main")}
               >
                 Principal
@@ -674,7 +893,7 @@ export function DocumentResults({
                 <Button
                   key={doc.id}
                   variant={selectedConsolidatedDoc === "related" ? "default" : "outline"}
-                  size="sm"
+                  className="h-7 text-xs"
                   onClick={() => setSelectedConsolidatedDoc("related")}
                 >
                   Rel. {idx + 1}
@@ -719,13 +938,13 @@ export function DocumentResults({
   }
 
   const renderDatosView = (context: "consolidated" | "main" | "related", docIndex?: number) => (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 shrink-0">
-        <CardTitle className="flex items-center gap-2">
-          <Database className="h-5 w-5" />
+    <Card className="h-full">
+      <CardHeader className="flex flex-row items-center justify-between py-0.5 px-6">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Database className="h-4 w-4" />
           Datos Extraídos
         </CardTitle>
-        <div className="flex gap-1">
+        <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="sm" onClick={handleReprocessData} disabled={isProcessingData}>
@@ -748,7 +967,7 @@ export function DocumentResults({
           </Tooltip>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6 flex-1 overflow-auto">
+      <CardContent className="space-y-0.5">
         {/* Datos Generales Form */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -925,13 +1144,13 @@ export function DocumentResults({
     }
 
     return (
-      <Card className="h-full flex flex-col">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 shrink-0">
-          <CardTitle className="flex items-center gap-2">
-            <FileOutput className="h-5 w-5" />
+      <Card className="h-full">
+        <CardHeader className="flex flex-row items-center justify-between py-0.5 px-6">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileOutput className="h-4 w-4" />
             Resultado del Asistente
           </CardTitle>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
             {currentReasoning && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -961,7 +1180,7 @@ export function DocumentResults({
             </Tooltip>
           </div>
         </CardHeader>
-        <CardContent className="space-y-6 flex-1 overflow-auto">
+        <CardContent className="space-y-0.5">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-muted-foreground uppercase">Datos Generales</h3>
@@ -1189,13 +1408,29 @@ export function DocumentResults({
     const columnCount = visibleViews.length
 
     return (
-      <div className={`grid gap-6 mt-6`} style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
-        {visibleViews.map((view) => (
-          <div key={view} className="relative h-[600px]">
-            {view === "documento" && renderDocumentoView(context, docIndex)}
-            {view === "datos" && renderDatosView(context, docIndex)}
-            {view === "resultado" && renderResultadoView(context, docIndex)}
-          </div>
+      <div ref={columnsContainerRef} className="flex gap-0 mt-2 relative">
+        {visibleViews.map((view, index) => (
+          <React.Fragment key={view}>
+            <div
+              className="relative"
+              style={{
+                width: `${columnWidths[index]}%`,
+                transition: isDragging ? "none" : "width 0.2s ease",
+              }}
+            >
+              {view === "documento" && renderDocumentoView(context, docIndex)}
+              {view === "datos" && renderDatosView(context, docIndex)}
+              {view === "resultado" && renderResultadoView(context, docIndex)}
+            </div>
+            {index < columnCount - 1 && (
+              <div
+                className="w-1 hover:w-2 cursor-col-resize hover:bg-primary/20 transition-all flex-shrink-0 group relative"
+                onMouseDown={(e) => handleResizeStart(e, index)}
+              >
+                <div className="absolute inset-y-0 -left-1 -right-1 group-hover:bg-primary/10" />
+              </div>
+            )}
+          </React.Fragment>
         ))}
       </div>
     )
@@ -1210,15 +1445,19 @@ export function DocumentResults({
     <TooltipProvider>
       <div className="min-h-screen bg-background">
         <div className="bg-background sticky top-0 z-10 border-b-0">
-          <div className="container mx-auto px-6 py-4">
+          <div className="container mx-auto px-6 py-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <Button variant="ghost" size="sm" className="gap-2" onClick={() => router.back()}>
                   <ArrowLeft className="h-4 w-4" />
                   Volver al Dashboard
                 </Button>
-                <h1 className="text-2xl font-semibold">Documento {documentId}</h1>
+                <h1 className="text-lg font-semibold">Documento {documentId}</h1>
                 {getStatusBadge(documentStatus)}
+                <Button variant="outline" size="sm" className="gap-2 h-7 text-xs" onClick={() => setShowLogs(true)}>
+                  <Clock className="h-3.5 w-3.5" />
+                  Historial
+                </Button>
               </div>
               <div className="flex items-center gap-2">
                 {(documentStatus === "Para revisar" || documentStatus === "Para confirmar") && (
@@ -1316,10 +1555,10 @@ export function DocumentResults({
               </CardContent>
             </Card>
 
-            <TabsContent value="consolidated" className="space-y-4">{renderViewColumns("consolidated")}</TabsContent>
-            <TabsContent value="main" className="space-y-4">{renderViewColumns("main")}</TabsContent>
+            <TabsContent value="consolidated" className="mt-1">{renderViewColumns("consolidated")}</TabsContent>
+            <TabsContent value="main" className="mt-1">{renderViewColumns("main")}</TabsContent>
             {relatedDocuments.map((doc, idx) => (
-              <TabsContent key={doc.id} value={doc.id.toString()} className="space-y-4">{renderViewColumns("related", idx)}</TabsContent>
+              <TabsContent key={doc.id} value={doc.id.toString()} className="mt-1">{renderViewColumns("related", idx)}</TabsContent>
             ))}
           </Tabs>
         </div>
@@ -1384,18 +1623,28 @@ export function DocumentResults({
                     <span className="text-sm font-medium">{currentReasoning.confidence}%</span>
                   </div>
                   <Progress value={currentReasoning.confidence} className="h-2" />
-                </div>
-
-                {/* Data Quality */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold text-sm">Calidad de Datos</h3>
-                  <p className="text-sm text-muted-foreground">{currentReasoning.dataQuality}</p>
+                  {/* Data Quality */}
+                  <div className="space-y-2">
+                    <h3 className="font-semibold text-sm">Calidad de Datos</h3>
+                    <p className="text-sm text-muted-foreground">{currentReasoning.dataQuality}</p>
+                  </div>
                 </div>
               </div>
             )}
           </DialogContent>
         </Dialog>
       </div>
+      <DocumentLogsModal
+        isOpen={showLogs}
+        onClose={() => setShowLogs(false)}
+        documentId={documentId as string}
+        documentName={documentGroup?.main_document?.file_name || "Documento"}
+        logs={[
+          { timestamp: "2024-03-20 10:30:00", message: "Documento subido", type: "info" },
+          { timestamp: "2024-03-20 10:30:05", message: "Análisis iniciado", type: "info" },
+          { timestamp: "2024-03-20 10:30:15", message: "Datos extraídos correctamente", type: "success" },
+        ]}
+      />
     </TooltipProvider>
   )
 }

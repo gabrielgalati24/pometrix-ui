@@ -39,6 +39,7 @@ export interface RelatedDocument {
 
 export interface DashboardDocument {
   id: string // Now uses format DOC-1001
+  backendId?: number // Backend database ID for API calls
   filename: string
   type: string
   uploadDate: string
@@ -48,6 +49,13 @@ export interface DashboardDocument {
   total: string
   documentNumber: string
   relatedDocuments: RelatedDocument[]
+  uploadedBy?: string // User who uploaded the document
+  usedForTraining?: boolean // Whether document was used for training
+  logs?: Array<{
+    timestamp: string
+    message: string
+    type: "info" | "success" | "warning" | "error"
+  }>
 }
 
 export const getMockData = (documentId: string): ExtractedData | null => {
@@ -272,140 +280,140 @@ export const getAccountingEntry = (documentId: string, data: ExtractedData | nul
     outputTable:
       documentId === "3" && data?.table
         ? {
-            headers: [
-              "ID",
-              "Cód. Cuenta",
-              "Nombre Cuenta",
-              "Debe",
-              "Haber",
-              "Centro Costo",
-              "Proyecto",
-              "Cód. Impuesto",
-              "Referencia",
-              "Notas",
-            ],
-            rows: [
-              {
-                ID: "1",
-                "Cód. Cuenta": "1105",
-                "Nombre Cuenta": "Mercaderías - Electrónica",
-                Debe: 8818000,
-                Haber: 0,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V001-V010",
-                Notas: "Ventas período enero 2024",
-              },
-              {
-                ID: "2",
-                "Cód. Cuenta": "1110",
-                "Nombre Cuenta": "IVA Débito Fiscal",
-                Debe: 1851885,
-                Haber: 0,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V001-V010",
-                Notas: "IVA 21% sobre ventas",
-              },
-              {
-                ID: "3",
-                "Cód. Cuenta": "4101",
-                "Nombre Cuenta": "Ventas - Electrónica",
-                Debe: 0,
-                Haber: 5340000,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V001,V004,V005",
-                Notas: "Notebooks, monitores, impresoras",
-              },
-              {
-                ID: "4",
-                "Cód. Cuenta": "4102",
-                "Nombre Cuenta": "Ventas - Accesorios",
-                Debe: 0,
-                Haber: 1237500,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V002,V003,V006",
-                Notas: "Mouse, teclados, webcams",
-              },
-              {
-                ID: "5",
-                "Cód. Cuenta": "4103",
-                "Nombre Cuenta": "Ventas - Almacenamiento",
-                Debe: 0,
-                Haber: 1900000,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V007",
-                Notas: "Discos SSD Samsung 1TB",
-              },
-              {
-                ID: "6",
-                "Cód. Cuenta": "4104",
-                "Nombre Cuenta": "Ventas - Redes",
-                Debe: 0,
-                Haber: 336000,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V008",
-                Notas: "Routers TP-Link",
-              },
-              {
-                ID: "7",
-                "Cód. Cuenta": "4105",
-                "Nombre Cuenta": "Ventas - Audio",
-                Debe: 0,
-                Haber: 1080000,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V009",
-                Notas: "Auriculares Sony",
-              },
-              {
-                ID: "8",
-                "Cód. Cuenta": "4106",
-                "Nombre Cuenta": "Ventas - Cables",
-                Debe: 0,
-                Haber: 175000,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "IVA-21",
-                Referencia: "V010",
-                Notas: "Cables HDMI",
-              },
-              {
-                ID: "9",
-                "Cód. Cuenta": "1101",
-                "Nombre Cuenta": "Caja y Bancos",
-                Debe: 0,
-                Haber: 10669885,
-                "Centro Costo": "CC-VEN",
-                Proyecto: "PRJ-2024-Q1",
-                "Cód. Impuesto": "",
-                Referencia: "V001-V010",
-                Notas: "Cobros efectivo y transferencias",
-              },
-              {
-                ID: "10",
-                "Cód. Cuenta": "5201",
-                "Nombre Cuenta": "Comisiones Vendedores",
-                Debe: 440900,
-                credit: 0,
-                description: "Comisión 5% sobre ventas netas",
-                costCenter: "CC-VEN",
-                project: "PRJ-2024-Q1",
-                taxCode: "",
-              },
-            ],
-          }
+          headers: [
+            "ID",
+            "Cód. Cuenta",
+            "Nombre Cuenta",
+            "Debe",
+            "Haber",
+            "Centro Costo",
+            "Proyecto",
+            "Cód. Impuesto",
+            "Referencia",
+            "Notas",
+          ],
+          rows: [
+            {
+              ID: "1",
+              "Cód. Cuenta": "1105",
+              "Nombre Cuenta": "Mercaderías - Electrónica",
+              Debe: 8818000,
+              Haber: 0,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V001-V010",
+              Notas: "Ventas período enero 2024",
+            },
+            {
+              ID: "2",
+              "Cód. Cuenta": "1110",
+              "Nombre Cuenta": "IVA Débito Fiscal",
+              Debe: 1851885,
+              Haber: 0,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V001-V010",
+              Notas: "IVA 21% sobre ventas",
+            },
+            {
+              ID: "3",
+              "Cód. Cuenta": "4101",
+              "Nombre Cuenta": "Ventas - Electrónica",
+              Debe: 0,
+              Haber: 5340000,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V001,V004,V005",
+              Notas: "Notebooks, monitores, impresoras",
+            },
+            {
+              ID: "4",
+              "Cód. Cuenta": "4102",
+              "Nombre Cuenta": "Ventas - Accesorios",
+              Debe: 0,
+              Haber: 1237500,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V002,V003,V006",
+              Notas: "Mouse, teclados, webcams",
+            },
+            {
+              ID: "5",
+              "Cód. Cuenta": "4103",
+              "Nombre Cuenta": "Ventas - Almacenamiento",
+              Debe: 0,
+              Haber: 1900000,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V007",
+              Notas: "Discos SSD Samsung 1TB",
+            },
+            {
+              ID: "6",
+              "Cód. Cuenta": "4104",
+              "Nombre Cuenta": "Ventas - Redes",
+              Debe: 0,
+              Haber: 336000,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V008",
+              Notas: "Routers TP-Link",
+            },
+            {
+              ID: "7",
+              "Cód. Cuenta": "4105",
+              "Nombre Cuenta": "Ventas - Audio",
+              Debe: 0,
+              Haber: 1080000,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V009",
+              Notas: "Auriculares Sony",
+            },
+            {
+              ID: "8",
+              "Cód. Cuenta": "4106",
+              "Nombre Cuenta": "Ventas - Cables",
+              Debe: 0,
+              Haber: 175000,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "IVA-21",
+              Referencia: "V010",
+              Notas: "Cables HDMI",
+            },
+            {
+              ID: "9",
+              "Cód. Cuenta": "1101",
+              "Nombre Cuenta": "Caja y Bancos",
+              Debe: 0,
+              Haber: 10669885,
+              "Centro Costo": "CC-VEN",
+              Proyecto: "PRJ-2024-Q1",
+              "Cód. Impuesto": "",
+              Referencia: "V001-V010",
+              Notas: "Cobros efectivo y transferencias",
+            },
+            {
+              ID: "10",
+              "Cód. Cuenta": "5201",
+              "Nombre Cuenta": "Comisiones Vendedores",
+              Debe: 440900,
+              credit: 0,
+              description: "Comisión 5% sobre ventas netas",
+              costCenter: "CC-VEN",
+              project: "PRJ-2024-Q1",
+              taxCode: "",
+            },
+          ],
+        }
         : undefined,
     entries: [
       {
@@ -465,6 +473,7 @@ export const getAccountingEntry = (documentId: string, data: ExtractedData | nul
 export const mockDocuments: DashboardDocument[] = [
   {
     id: "DOC-2001",
+    backendId: 2001,
     filename: "factura_suministros_ind_4523.pdf",
     type: "Factura",
     uploadDate: "2024-01-20",
@@ -474,9 +483,17 @@ export const mockDocuments: DashboardDocument[] = [
     total: "$87,450.00",
     documentNumber: "0001-00004523",
     relatedDocuments: [{ id: "2001a", filename: "remito_1847.pdf", type: "Remito" }],
+    uploadedBy: "currentUser",
+    usedForTraining: false,
+    logs: [
+      { timestamp: "2024-01-20 10:30:00", message: "Documento cargado exitosamente", type: "success" },
+      { timestamp: "2024-01-20 10:31:15", message: "Procesamiento iniciado", type: "info" },
+      { timestamp: "2024-01-20 10:32:45", message: "Extracción de datos completada", type: "success" },
+    ],
   },
   {
     id: "DOC-2002",
+    backendId: 2002,
     filename: "factura_materiales_const_8901.pdf",
     type: "Factura",
     uploadDate: "2024-01-22",
@@ -489,9 +506,16 @@ export const mockDocuments: DashboardDocument[] = [
       { id: "2002a", filename: "remito_3421.pdf", type: "Remito" },
       { id: "2002b", filename: "certificado_calidad.pdf", type: "Certificado" },
     ],
+    uploadedBy: "user1",
+    usedForTraining: true,
+    logs: [
+      { timestamp: "2024-01-22 14:15:00", message: "Documento cargado exitosamente", type: "success" },
+      { timestamp: "2024-01-22 14:16:30", message: "Se detectaron observaciones en el documento", type: "warning" },
+    ],
   },
   {
     id: "DOC-2003",
+    backendId: 2003,
     filename: "nota_credito_devoluciones_152.pdf",
     type: "Nota de Crédito",
     uploadDate: "2024-01-19",
@@ -501,9 +525,17 @@ export const mockDocuments: DashboardDocument[] = [
     total: "-$23,560.00",
     documentNumber: "NC-00000152",
     relatedDocuments: [{ id: "2003a", filename: "factura_original_7845.pdf", type: "Factura" }],
+    uploadedBy: "user2",
+    usedForTraining: false,
+    logs: [
+      { timestamp: "2024-01-19 09:00:00", message: "Documento cargado exitosamente", type: "success" },
+      { timestamp: "2024-01-19 09:02:00", message: "Procesado correctamente", type: "success" },
+      { timestamp: "2024-01-19 09:05:00", message: "Confirmado por usuario", type: "success" },
+    ],
   },
   {
     id: "DOC-2004",
+    backendId: 2004,
     filename: "factura_servicios_profesionales_245.pdf",
     type: "Factura",
     uploadDate: "2024-01-21",
@@ -513,9 +545,16 @@ export const mockDocuments: DashboardDocument[] = [
     total: "$198,000.00",
     documentNumber: "FC-B-00000245",
     relatedDocuments: [],
+    uploadedBy: "user3",
+    usedForTraining: false,
+    logs: [
+      { timestamp: "2024-01-21 11:20:00", message: "Documento cargado exitosamente", type: "success" },
+      { timestamp: "2024-01-21 11:25:00", message: "Exportado al sistema contable", type: "success" },
+    ],
   },
   {
     id: "DOC-2005",
+    backendId: 2005,
     filename: "factura_alquiler_equipos_1092.pdf",
     type: "Factura",
     uploadDate: "2024-01-18",
@@ -525,9 +564,17 @@ export const mockDocuments: DashboardDocument[] = [
     total: "$67,890.00",
     documentNumber: "0005-00001092",
     relatedDocuments: [{ id: "2005a", filename: "contrato_alquiler.pdf", type: "Contrato" }],
+    uploadedBy: "currentUser",
+    usedForTraining: false,
+    logs: [
+      { timestamp: "2024-01-18 16:45:00", message: "Documento cargado exitosamente", type: "success" },
+      { timestamp: "2024-01-18 16:50:00", message: "Error en validación de datos", type: "error" },
+      { timestamp: "2024-01-18 16:55:00", message: "Documento rechazado por usuario", type: "warning" },
+    ],
   },
   {
     id: "DOC-2006",
+    backendId: 2006,
     filename: "factura_combustible_flota_5632.pdf",
     type: "Factura",
     uploadDate: "2024-01-23",
@@ -539,6 +586,12 @@ export const mockDocuments: DashboardDocument[] = [
     relatedDocuments: [
       { id: "2006a", filename: "remito_combustible_5632.pdf", type: "Remito" },
       { id: "2006b", filename: "detalle_carga_por_vehiculo.pdf", type: "Detalle" },
+    ],
+    uploadedBy: "user1",
+    usedForTraining: true,
+    logs: [
+      { timestamp: "2024-01-23 08:30:00", message: "Documento cargado exitosamente", type: "success" },
+      { timestamp: "2024-01-23 08:35:00", message: "Procesamiento completado", type: "success" },
     ],
   },
 ]
@@ -806,7 +859,7 @@ export function getSimpleDocumentData(documentId: string) {
       },
     }
   }
-  
+
   if (documentId === "DOC-2002") {
     return {
       mainDocument: {
@@ -970,7 +1023,7 @@ export function getSimpleDocumentData(documentId: string) {
       },
     }
   }
-  
+
   if (documentId === "DOC-2003") {
     return {
       mainDocument: {
@@ -1119,7 +1172,7 @@ export function getSimpleDocumentData(documentId: string) {
       },
     }
   }
-  
+
   if (documentId === "DOC-2004") {
     return {
       mainDocument: {
@@ -1221,7 +1274,7 @@ export function getSimpleDocumentData(documentId: string) {
       },
     }
   }
-  
+
   if (documentId === "DOC-2005") {
     return {
       mainDocument: {
@@ -1368,7 +1421,7 @@ export function getSimpleDocumentData(documentId: string) {
       },
     }
   }
-  
+
   if (documentId === "DOC-2006") {
     return {
       mainDocument: {
@@ -1525,6 +1578,6 @@ export function getSimpleDocumentData(documentId: string) {
       },
     }
   }
-  
+
   return null
 }
